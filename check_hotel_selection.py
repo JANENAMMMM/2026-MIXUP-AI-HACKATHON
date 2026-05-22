@@ -5,6 +5,12 @@ import sys
 import types
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # 환경에 langgraph가 없을 때도 stay_node.py를 확인하기 위해 최소한의 더미 모듈을 추가합니다.
 root = Path(__file__).resolve().parent
 sys.path.insert(0, str(root))
@@ -47,12 +53,17 @@ stay_module = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(stay_module)
 
-_search_top3 = stay_module._search_top3
+search_hotel_candidates = stay_module.search_hotel_candidates
 
 
 def main() -> None:
+    region = input("검색할 지역을 입력하세요 (예: Osaka, Tokyo, Seoul): ").strip()
+    if not region:
+        region = "Osaka"
+        print(f"입력값이 없어 기본값인 '{region}'(으)로 검색합니다.")
+
     intent = {
-        "destination": "Osaka",
+        "destination": region,
         "check_in": "2026-06-01",
         "check_out": "2026-06-03",
         "adults": 2,
@@ -70,7 +81,7 @@ def main() -> None:
     if not os.getenv("SERPAPI_KEY"):
         print("  ⚠️ SERPAPI_KEY가 설정되지 않았습니다. Mock 데이터를 사용합니다.")
 
-    candidates = _search_top3(intent, max_per_night)
+    candidates = search_hotel_candidates(intent, max_per_night, limit=10)
 
     print("\n검색 결과 후보:")
     print(json.dumps(candidates, indent=2, ensure_ascii=False))

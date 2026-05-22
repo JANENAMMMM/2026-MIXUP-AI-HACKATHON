@@ -1,3 +1,4 @@
+import urllib.parse
 from dataclasses import dataclass, field
 
 
@@ -47,28 +48,40 @@ class Hotel:
 
     @classmethod
     def from_api_response(cls, data: dict) -> "Hotel":
+        # Robust thumbnail extraction
         thumbnail = data.get("thumbnail")
-        if isinstance(thumbnail, dict):
+        if not thumbnail:
+            # Try images[0].thumbnail or images[0].src or images[0].image
+            images = data.get("images") or data.get("photos")
+            if isinstance(images, list) and images:
+                img0 = images[0]
+                thumb = img0.get("thumbnail") or img0.get("src") or img0.get("image")
+                if thumb:
+                    thumbnail = thumb
+        elif isinstance(thumbnail, dict):
             thumbnail = thumbnail.get("image") or thumbnail.get("src") or thumbnail.get("source")
 
+        address = data.get("address") or data.get("address_snippet") or data.get("location") or ""
+        name = data.get("name", "")
+
+        # 사용자가 바로 접속할 수 있도록 모든 호텔의 상세 링크를 구글 트래블 검색 URL로 일괄 통일합니다.
+        search_query = f"{name} {address}".strip()
+        details_link = f"https://www.google.com/travel/search?q={urllib.parse.quote(search_query)}"
+
         return cls(
-            name=data.get("name", ""),
-            address=data.get("address") or data.get("address_snippet") or data.get("location"),
+            name=name,
+            address=address,
             description=data.get("description") or data.get("snippet") or data.get("description_snippet"),
             thumbnail=thumbnail,
             type=data.get("type"),
             hotel_class=data.get("hotel_class") or data.get("extracted_hotel_class"),
             overall_rating=data.get("overall_rating"),
             reviews=data.get("reviews"),
-            rate_per_night=data.get("rate_per_night", {}).get("lowest"),
-            total_rate=data.get("total_rate", {}).get("lowest"),
+            rate_per_night=(data.get("rate_per_night", {}) or {}).get("lowest"),
+            total_rate=(data.get("total_rate", {}) or {}).get("lowest"),
             amenities=data.get("amenities", []),
             property_token=data.get("property_token"),
-            details_link=(
-                data.get("serpapi_property_details_link")
-                or data.get("details_link")
-                or data.get("link")
-            ),
+            details_link=details_link,
         )
 
 

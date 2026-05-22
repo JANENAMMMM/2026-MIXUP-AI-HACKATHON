@@ -50,8 +50,8 @@ def _parse_cost(raw: str | None) -> int:
     return cost if cost >= 10000 else 0
 
 
-def _search_top3(intent: dict, max_per_night: int) -> list[dict]:
-    """SerpAPI로 예산 이내 호텔 TOP 3를 검색한다. 실패 시 Mock 반환."""
+def search_hotel_candidates(intent: dict, max_per_night: int, limit: int = 10) -> list[dict]:
+    """SerpAPI로 예산 이내 호텔 추천 후보를 검색한다 (최대 limit개). 실패 시 Mock 반환."""
     serpapi_key = os.getenv("SERPAPI_KEY")
     if not serpapi_key:
         print("  ✗ SERPAPI_KEY 없음 → Mock 데이터 사용")
@@ -71,7 +71,7 @@ def _search_top3(intent: dict, max_per_night: int) -> list[dict]:
             raise ValueError("검색 결과 없음")
 
         candidates = []
-        for h in result.hotels[:3]:
+        for h in result.hotels[:limit]:
             cost = _parse_cost(h.total_rate or h.rate_per_night)
             candidates.append({
                 "name": h.name,
@@ -131,7 +131,7 @@ def make_stay_node():
         max_per_night = max_budget // max(intent.get("trip_nights", 1), 1)
         print(f"  → 선호 호텔 없음. 1박 최대 {max_per_night:,}원 이내 후보 검색 중...")
 
-        candidates = _search_top3(intent, max_per_night)
+        candidates = search_hotel_candidates(intent, max_per_night, limit=10)
 
         # interrupt() — 그래프 일시 중단, 유저에게 선택지 전달
         choice = interrupt({
