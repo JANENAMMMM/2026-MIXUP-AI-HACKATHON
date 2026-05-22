@@ -75,8 +75,7 @@ def _fetch_price(
         "outbound_date": outbound_date,
         "return_date": return_date,
         "currency": "KRW",
-        "hl": "ko",
-        "type": "2",   # 왕복
+        "hl": "en",
         "api_key": api_key,
     }
     try:

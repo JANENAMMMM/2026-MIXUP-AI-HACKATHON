@@ -224,23 +224,32 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
         return candidates or [(today + timedelta(days=30)).isoformat()]
 
     def _weather_only_candidates(dest: str, trip_nights: int, today: date_type, intent: TravelIntent) -> dict:
-        """항공 API 실패 시 날씨만으로 단기 예보 범위 내 최적 날짜 3개를 추천한다."""
-        # 단기 예보 한계(D+14)까지만 탐색 — D+15 이상은 데이터 없을 수 있음
+        """항공 API 실패 시 날씨만으로 최적 날짜 3개를 추천한다.
+
+        target_months가 있으면 해당 월의 날짜를 탐색하고,
+        없으면 D+14 이내 단기 예보 범위를 탐색한다.
+        """
+        target_months: list = intent.get("target_months") or []
+        if target_months:
+            probe_dates = _make_candidate_dates(target_months, today)
+        else:
+            probe_dates = [(today + timedelta(days=i)).isoformat() for i in range(1, 14, 3)]
+
         candidates = []
-        for offset in range(1, 14, 3):
-            check_date = (today + timedelta(days=offset)).isoformat()
+        for check_date in probe_dates:
             try:
                 w = get_weather(dest, check_date, silent=True)
             except Exception:
                 continue
-            if not w or not w.daily:
+            if not w or not w.daily or w.daily.temp_max is None:
                 continue
             d = w.daily
-            if d.temp_max is None:  # 날짜가 예보 범위 밖이면 스킵
-                continue
-            prob = d.precipitation_probability_max or 0
+            prob = d.precipitation_probability_max
             temp_max = d.temp_max
-            score = (3 if prob < 50 else 0) + (3 if 18 <= temp_max <= 28 else 0)
+            prob_score = 3 if (prob is None or prob < 50) else 0
+            temp_score = 3 if 18 <= temp_max <= 28 else 0
+            score = float(prob_score + temp_score)
+            prob_str = f"강수확률 {prob:.0f}%" if prob is not None else f"강수 {d.precipitation_sum or 0:.1f}mm"
             check_out = (
                 datetime.strptime(check_date, "%Y-%m-%d").date()
                 + timedelta(days=trip_nights)
@@ -249,11 +258,11 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
                 "check_in": check_date,
                 "check_out": check_out,
                 "flight_price": 0,
-                "weather_summary": f"최고 {temp_max}°C, 강수확률 {prob}%",
-                "score": float(score),
-                "reason": f"날씨 기반 추천 · {temp_max}°C, 강수확률 {prob}%",
+                "weather_summary": f"최고 {temp_max}°C, {prob_str}",
+                "score": score,
+                "reason": f"날씨 기반 추천 · 최고 {temp_max}°C, {prob_str}",
             })
-            if len(candidates) >= 3:
+            if len(candidates) >= 5:
                 break
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
@@ -263,6 +272,15 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             best = candidates[0]
             updated_intent["check_in"] = best["check_in"]
             updated_intent["check_out"] = best["check_out"]
+            print(f"  ✓ 날씨 기반 추천 날짜: {best['check_in']} ~ {best['check_out']} ({best['reason']})")
+        else:
+            # 모든 날씨 조회 실패 시 target_months 첫 번째 월 1일로 고정
+            fallback = probe_dates[0] if probe_dates else (today + timedelta(days=30)).isoformat()
+            updated_intent["check_in"] = fallback
+            updated_intent["check_out"] = (
+                datetime.strptime(fallback, "%Y-%m-%d").date() + timedelta(days=trip_nights)
+            ).isoformat()
+            print(f"  ⚠ 날씨 조회 실패, 기본 날짜 설정: {updated_intent['check_in']}")
 
         return {"candidate_dates": candidates[:3], "intent": updated_intent, "date_fixed": True}
 
@@ -271,6 +289,11 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
         """체크인~체크아웃 전 기간 날씨를 조회한다."""
         intent = state["intent"]
         dest = intent["destination"]
+
+        if not intent.get("check_in"):
+            print(f"\n⛅ [2/5] 날씨 조회 스킵 — check_in 미확정")
+            return {"is_rainy": False, "weather_summary": "날짜 미확정으로 날씨 조회 불가"}
+
         check_in = datetime.strptime(intent["check_in"], "%Y-%m-%d").date()
         check_out = datetime.strptime(intent["check_out"], "%Y-%m-%d").date()
         nights = (check_out - check_in).days
