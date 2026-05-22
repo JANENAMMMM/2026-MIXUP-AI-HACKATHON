@@ -34,14 +34,18 @@ def make_synthesizer_node(llm):
             "출력 형식 규칙 (반드시 준수):\n"
             "- 결과는 **한국어 마크다운**으로 출력.\n"
             "- 일정표는 반드시 **GFM 마크다운 표** 형식으로 작성. 예시:\n"
-            "  | 시간 | 장소 | 활동 | 비고 |\n"
-            "  |------|------|------|------|\n"
-            "  | 10:00 | 장소명 | 활동 내용 | — |\n"
+            "  | 시간 | 장소 | 활동 | 이동 | 비고 |\n"
+            "  |------|------|------|------|------|\n"
+            "  | 10:00 | 장소명 | 활동 내용 | 도보 0.8km | — |\n"
             "- 표 헤더 구분선(|---|)은 반드시 포함.\n"
+            "- [위치 기반 최적 동선]이 제공된 경우 → 해당 순서를 일정표에 그대로 반영하고, "
+            "  이동 거리(km)를 '이동' 열에 표기하라.\n"
             "- 예산 현황과 날씨 정보를 일정 상단에 ## 섹션으로 포함.\n"
             "- 날별로 ## Day 1, ## Day 2 형식으로 구분.\n"
             "- ASCII 박스(+--)나 공백 정렬 표는 절대 사용하지 마. GFM 파이프 표만 사용."
         ))
+
+        route_note = state.get("route_note", "")
 
         user_content = (
             f"목적지: {intent['destination']}\n"
@@ -50,6 +54,7 @@ def make_synthesizer_node(llm):
             f"날씨: {state.get('weather_summary', '')}\n"
             f"{candidate_text}\n"
             f"{places_text}"
+            + (f"\n{route_note}" if route_note else "")
         )
 
         print(f"\n📝 [5/5] 일정 생성 중 — Solar Pro3 호출...")

@@ -21,7 +21,7 @@ def search_places(query: str) -> list[Place]:
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": "places.displayName,places.formattedAddress",
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location",
     }
 
     response = requests.post(url, headers=headers, json={"textQuery": query}, timeout=30)

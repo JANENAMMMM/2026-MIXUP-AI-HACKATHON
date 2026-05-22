@@ -38,6 +38,7 @@ def _initial_state(user_msg: str) -> dict:
         "hotel_candidates": [],
         "restaurants": [],
         "attractions": [],
+        "route_note": "",
         "final_report": "",
     }
 

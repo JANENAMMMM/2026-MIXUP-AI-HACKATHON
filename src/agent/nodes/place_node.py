@@ -1,10 +1,117 @@
 import json
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.agent.state import AgentState
 from src.cheapest_date.iata import get_iata, is_domestic as iata_is_domestic
+
+
+# ──────────────────────────────────────────────
+# 거리 계산 및 경로 최적화
+# ──────────────────────────────────────────────
+
+def _haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """두 좌표 간 Haversine 거리 (km)."""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2)
+    return R * 2 * math.asin(math.sqrt(a))
+
+
+def _nearest_neighbor_route(
+    start_lat: float, start_lng: float, places: list[dict]
+) -> list[dict]:
+    """최근접 이웃 그리디로 장소 방문 순서를 최적화한다."""
+    unvisited = list(places)
+    ordered: list[dict] = []
+    cur_lat, cur_lng = start_lat, start_lng
+
+    while unvisited:
+        nearest = min(unvisited, key=lambda p: _haversine(cur_lat, cur_lng, p["lat"], p["lng"]))
+        unvisited.remove(nearest)
+        ordered.append(nearest)
+        cur_lat, cur_lng = nearest["lat"], nearest["lng"]
+
+    return ordered
+
+
+def _get_hotel_coords(
+    hotel_name: str, hotel_address: str, dest: str, domestic: bool
+) -> tuple[float, float] | None:
+    """호텔 좌표를 Naver/Google 검색으로 획득한다. 실패 시 None."""
+    if not hotel_name or "Mock" in hotel_name:
+        return None
+    query = f"{dest} {hotel_name}"
+    try:
+        if domestic:
+            from src.tourist.naver_local import search_local
+            results = search_local(query, display=1)
+            if results and results[0].lat and results[0].lng:
+                return (results[0].lat, results[0].lng)
+        else:
+            from src.tourist.google_places import search_places
+            results = search_places(query)
+            if results and results[0].lat and results[0].lng:
+                return (results[0].lat, results[0].lng)
+    except Exception:
+        pass
+    return None
+
+
+def _build_route_note(
+    hotel_lat: float,
+    hotel_lng: float,
+    hotel_name: str,
+    restaurants: list[dict],
+    attractions: list[dict],
+    trip_nights: int,
+) -> str:
+    """좌표가 있는 장소들로 일별 최적 동선 요약을 생성한다."""
+    geo_tagged = [
+        {**p, "_kind": "restaurant"}
+        for p in restaurants
+        if p.get("lat") and p.get("lng")
+    ] + [
+        {**p, "_kind": "attraction"}
+        for p in attractions
+        if p.get("lat") and p.get("lng")
+    ]
+
+    if not geo_tagged:
+        return ""
+
+    ordered = _nearest_neighbor_route(hotel_lat, hotel_lng, geo_tagged)
+
+    days = max(1, trip_nights)
+    per_day = math.ceil(len(ordered) / days)
+
+    lines = ["[ 위치 기반 최적 동선 ]",
+             f"숙소({hotel_name or '출발지'}) 기준 최근접 이웃 알고리즘으로 이동 거리를 최소화한 순서입니다.\n"]
+
+    for d in range(days):
+        day_places = ordered[d * per_day: (d + 1) * per_day]
+        if not day_places:
+            continue
+        lines.append(f"Day {d + 1}:")
+        cur_lat, cur_lng = hotel_lat, hotel_lng
+        total_km = 0.0
+        for p in day_places:
+            dist = _haversine(cur_lat, cur_lng, p["lat"], p["lng"])
+            total_km += dist
+            icon = "🍽" if p["_kind"] == "restaurant" else "🏛"
+            lines.append(
+                f"  {icon} {p['title']} "
+                f"({p.get('category', '')})"
+                f"  ← 이전 위치에서 {dist:.1f}km"
+            )
+            cur_lat, cur_lng = p["lat"], p["lng"]
+        lines.append(f"  ↳ Day {d + 1} 이동 합계: 약 {total_km:.1f}km\n")
+
+    return "\n".join(lines)
 
 
 # ──────────────────────────────────────────────
@@ -159,6 +266,8 @@ def _search_parallel_naver(queries: list[str], display: int = 5) -> list[dict]:
                 "title": p.title,
                 "address": p.road_address or p.address,
                 "category": p.category,
+                "lat": p.lat,
+                "lng": p.lng,
             }
             for p in places
         ]
@@ -187,7 +296,10 @@ def _search_parallel_google(queries: list[str]) -> list[dict]:
 
     def _fetch(q: str) -> list[dict]:
         places = search_places(q)
-        return [{"title": p.name, "address": p.address, "category": ""} for p in places]
+        return [
+            {"title": p.name, "address": p.address, "category": "", "lat": p.lat, "lng": p.lng}
+            for p in places
+        ]
 
     with ThreadPoolExecutor(max_workers=min(len(queries), 5)) as ex:
         futures = {ex.submit(_fetch, q): q for q in queries}
@@ -331,6 +443,12 @@ def make_place_node(llm):
             raw_r, raw_a = _mock_for(r_count, a_count)
 
         # LLM 큐레이션
+        # raw 좌표 인덱스: 제목 → (lat, lng)
+        raw_coords: dict[str, tuple[float, float]] = {}
+        for p in raw_r + raw_a:
+            if p.get("lat") and p.get("lng"):
+                raw_coords[p["title"]] = (p["lat"], p["lng"])
+
         if raw_r or raw_a:
             try:
                 print(f"  → LLM 큐레이션 중...")
@@ -355,8 +473,40 @@ def make_place_node(llm):
         else:
             restaurants, attractions = _mock_for(r_count, a_count)
 
+        # LLM이 큐레이션한 장소에 원본 좌표를 복원
+        for p in restaurants + attractions:
+            if not p.get("lat"):
+                coords = raw_coords.get(p["title"])
+                if coords:
+                    p["lat"], p["lng"] = coords
+
         print(f"  ✓ 맛집: {[r['title'] for r in restaurants]}")
         print(f"  ✓ 명소: {[a['title'] for a in attractions]}")
-        return {"restaurants": restaurants, "attractions": attractions}
+
+        # 위치 기반 경로 최적화
+        print(f"  → 동선 최적화 중...")
+        hotel_coords = _get_hotel_coords(hotel_name, hotel_address, dest, domestic)
+        if hotel_coords:
+            h_lat, h_lng = hotel_coords
+            print(f"  ✓ 호텔 좌표 확보: ({h_lat:.4f}, {h_lng:.4f})")
+        else:
+            # 좌표 있는 장소들의 중심점을 출발지로 사용
+            geo = [p for p in restaurants + attractions if p.get("lat") and p.get("lng")]
+            if geo:
+                h_lat = sum(p["lat"] for p in geo) / len(geo)
+                h_lng = sum(p["lng"] for p in geo) / len(geo)
+            else:
+                h_lat, h_lng = 0.0, 0.0
+
+        route_note = _build_route_note(
+            h_lat, h_lng, hotel_name, restaurants, attractions, trip_nights
+        )
+        if route_note:
+            geo_count = sum(1 for p in restaurants + attractions if p.get("lat") and p.get("lng"))
+            print(f"  ✓ 동선 계산 완료 ({geo_count}개 장소 좌표 반영)")
+        else:
+            print(f"  ✗ 좌표 없음 → 동선 계산 생략")
+
+        return {"restaurants": restaurants, "attractions": attractions, "route_note": route_note}
 
     return place_node
