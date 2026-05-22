@@ -12,6 +12,7 @@ class PlaceItem(BaseModel):
     title: str
     address: str
     category: str
+    description: str = ""
 
 
 class PlanResponse(BaseModel):

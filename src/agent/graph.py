@@ -14,7 +14,7 @@ from .nodes import (
     weather_node,
     make_hotel_compute_node,
     make_hotel_select_node,
-    place_node,
+    make_place_node,
     make_synthesizer_node,
 )
 
@@ -50,7 +50,7 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
     graph.add_node("weather", weather_node)
     graph.add_node("hotel_compute", make_hotel_compute_node())
     graph.add_node("hotel_select", make_hotel_select_node())
-    graph.add_node("place", place_node)
+    graph.add_node("place", make_place_node(llm))
     graph.add_node("synthesizer", make_synthesizer_node(llm))
 
     graph.add_edge(START, "intent_router")

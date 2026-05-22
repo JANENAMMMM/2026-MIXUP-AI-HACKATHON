@@ -40,6 +40,7 @@ class AgentState(TypedDict):
     # 5. Place Node 출력
     restaurants: list
     attractions: list
+    route_note: str  # 위치 기반 최적 동선 요약 (좌표 없으면 빈 문자열)
 
     # 6. Synthesizer 출력
     final_report: str

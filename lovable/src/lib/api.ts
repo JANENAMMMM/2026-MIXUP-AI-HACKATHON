@@ -11,6 +11,7 @@ export interface PlaceItem {
   title: string;
   address: string;
   category: string;
+  description?: string;
 }
 
 export interface PlanResult {
