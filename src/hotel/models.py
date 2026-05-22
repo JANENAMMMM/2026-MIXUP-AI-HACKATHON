@@ -32,6 +32,9 @@ class HotelSearchRequest:
 class Hotel:
     """개별 호텔 정보."""
     name: str
+    address: str | None = None
+    description: str | None = None
+    thumbnail: str | None = None
     type: str | None = None
     hotel_class: str | None = None
     overall_rating: float | None = None
@@ -44,8 +47,15 @@ class Hotel:
 
     @classmethod
     def from_api_response(cls, data: dict) -> "Hotel":
+        thumbnail = data.get("thumbnail")
+        if isinstance(thumbnail, dict):
+            thumbnail = thumbnail.get("image") or thumbnail.get("src") or thumbnail.get("source")
+
         return cls(
             name=data.get("name", ""),
+            address=data.get("address") or data.get("address_snippet") or data.get("location"),
+            description=data.get("description") or data.get("snippet") or data.get("description_snippet"),
+            thumbnail=thumbnail,
             type=data.get("type"),
             hotel_class=data.get("hotel_class") or data.get("extracted_hotel_class"),
             overall_rating=data.get("overall_rating"),
@@ -54,7 +64,11 @@ class Hotel:
             total_rate=data.get("total_rate", {}).get("lowest"),
             amenities=data.get("amenities", []),
             property_token=data.get("property_token"),
-            details_link=data.get("serpapi_property_details_link"),
+            details_link=(
+                data.get("serpapi_property_details_link")
+                or data.get("details_link")
+                or data.get("link")
+            ),
         )
 
 

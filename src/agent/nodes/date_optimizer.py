@@ -229,7 +229,7 @@ def _get_trip_weather(
             weather_score += 1
         if 18 <= temp_max <= 28:
             weather_score += 1
-        if prob is not None and prob < 20:
+        if prob is not None and prob < 10:
             weather_score += 1
 
         parts = [f"{target}:"]
@@ -369,8 +369,8 @@ def make_date_optimizer_node():
             return _weather_only_candidates(dest, trip_nights, today, intent)
         print(f"  ✓ 항공권 {len(flights)}건 조회 완료")
 
-        # 1단계: 가격 + 경유 + 시간대만으로 빠른 사전 점수 계산 (API 호출 없음)
-        print(f"  → 사전 점수 계산 후 상위 20건 날씨 조회...")
+        # 1단계: 가격 + 경유 + 시간대만으로 빠른 사전 점수 계산 (날씨 API 호출 없음)
+        _WEATHER_TOP_N = 10
         pre_scored = []
         for flight in flights:
             pre_score, _ = _score_flight(flight, flights, weather_score=0.0, prefer_nonstop=prefer_nonstop)
@@ -379,9 +379,15 @@ def make_date_optimizer_node():
             ).isoformat()
             pre_scored.append((pre_score, flight, check_out))
         pre_scored.sort(key=lambda x: x[0], reverse=True)
-        top20_flights = pre_scored[:20]
+        top20_flights = pre_scored[:_WEATHER_TOP_N]
 
-        # 2단계: 상위 20건에 전체 여행 기간 날씨 조회 후 최종 종합 점수
+        weather_target = len(top20_flights)
+        if len(flights) > weather_target:
+            print(f"  → 가격/경유 기준 상위 {weather_target}건 날씨 조회 중...")
+        else:
+            print(f"  → {weather_target}건 전체 날씨 조회 중...")
+
+        # 2단계: 상위 N건에 전체 여행 기간 날씨 조회 후 최종 종합 점수
         candidates = []
         for _, flight, check_out in top20_flights:
             weather_score, weather_desc, weather_full = _get_trip_weather(
