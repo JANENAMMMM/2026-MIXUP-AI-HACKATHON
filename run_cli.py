@@ -14,19 +14,19 @@ app = build_graph()
 
 
 def _show_date_candidates(interrupt_val: dict) -> str:
-    """날짜 후보 목록을 출력하고 사용자 선택(1/2/3)을 받는다."""
+    """date_optimizer가 이미 테이블을 출력했으므로 번호만 입력받는다."""
     candidates = interrupt_val.get("candidates", [])
-    print(f"\n{interrupt_val.get('question', '날짜를 선택해주세요:')}")
-    for i, c in enumerate(candidates, 1):
-        price_str = f" | 항공 {c['flight_price']:,}원" if c.get("flight_price") else ""
-        print(f"  {i}) {c['check_in']} ~ {c['check_out']} | {c.get('weather_summary', '')}{price_str}")
-        print(f"      {c.get('reason', '')}")
-
+    n = len(candidates)
     while True:
-        choice = input(f"\n번호를 선택하세요 (1~{len(candidates)}): ").strip()
-        if choice.isdigit() and 1 <= int(choice) <= len(candidates):
-            return choice
-        print(f"  1~{len(candidates)} 사이의 숫자를 입력해주세요.")
+        try:
+            raw = input(f"\n  번호를 선택하세요 (1~{n}, Enter = 1번): ").strip()
+            if not raw:
+                return "1"
+            if raw.isdigit() and 1 <= int(raw) <= n:
+                return raw
+            print(f"  1~{n} 사이의 숫자를 입력하세요.")
+        except EOFError:
+            return "1"
 
 
 def _show_hotel_candidates(interrupt_val: dict) -> str:

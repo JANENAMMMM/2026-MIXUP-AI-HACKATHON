@@ -10,7 +10,7 @@ def make_synthesizer_node(llm):
 
         candidate_text = ""
         if candidates:
-            candidate_text = "\n[ 추천 날짜 TOP 3 ]\n"
+            candidate_text = "\n[ 기타 상위 추천 날짜 (참고용) ]\n"
             for i, c in enumerate(candidates, 1):
                 candidate_text += (
                     f"  {i}위) {c['check_in']} ~ {c['check_out']} "
@@ -41,11 +41,20 @@ def make_synthesizer_node(llm):
             "- ASCII 박스(+--)나 공백 정렬 표는 절대 사용하지 마. GFM 파이프 표만 사용."
         ))
 
+        flight_cost = intent.get("flight_cost", 0)
+        hotel_cost = state.get("hotel_cost", 0)
+        remaining = state.get("remaining_budget", 0)
+        adults = intent.get("adults", 1)
+        nights = intent.get("trip_nights", 1)
+
         user_content = (
             f"목적지: {intent['destination']}\n"
-            f"일정: {intent['check_in']} ~ {intent['check_out']}\n"
-            f"예산: {intent['budget']:,}원 (숙박 후 잔여: {state.get('remaining_budget', 0):,}원)\n"
-            f"날씨: {state.get('weather_summary', '')}\n"
+            f"일정: {intent['check_in']} ~ {intent['check_out']} ({nights}박, {adults}명)\n"
+            f"총 예산: {intent['budget']:,}원\n"
+            f"  - 항공권(왕복 {adults}인): -{flight_cost:,}원\n"
+            f"  - 숙박({nights}박 총액):  -{hotel_cost:,}원\n"
+            f"  - 잔여 예산(식비·관광 등): {remaining:,}원\n"
+            f"날씨:\n{state.get('weather_summary', '')}\n"
             f"{candidate_text}\n"
             f"{places_text}"
         )

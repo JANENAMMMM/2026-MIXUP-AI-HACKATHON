@@ -71,8 +71,13 @@ def search_hotel_candidates(intent: dict, max_per_night: int, limit: int = 10) -
             raise ValueError("검색 결과 없음")
 
         candidates = []
+        nights = max(intent.get("trip_nights", 1), 1)
         for h in result.hotels[:limit]:
-            cost = _parse_cost(h.total_rate or h.rate_per_night)
+            if h.total_rate:
+                cost = _parse_cost(h.total_rate)
+            else:
+                cost = _parse_cost(h.rate_per_night) * nights
+                
             candidates.append({
                 "name": h.name,
                 "address": h.address or "",
@@ -112,38 +117,51 @@ def make_stay_node():
     def stay_node(state: AgentState) -> dict:
         intent = state["intent"]
         preferred = intent.get("preferred_hotel")
+        budget = intent["budget"]
+        nights = max(intent.get("trip_nights", 1), 1)
+        adults = intent.get("adults", 1)
+        # flight_cost: Naver/SerpAPI 모두 1인 왕복 기준이므로 adults 곱한 값이 들어옴
+        flight_cost = intent.get("flight_cost", 0)
 
         print(f"\n🏨 [3/5] 숙소 확인 중 — {intent['destination']}")
+        print(f"  예산 현황: 총 {budget:,}원 | 항공(왕복×{adults}인) {flight_cost:,}원 차감")
 
-        # Case 1: 선호 호텔 명시 → 그대로 패스
+        after_flight = budget - flight_cost
+
+        # Case 1: 선호 호텔 명시 → 가격 조회 없이 패스
         if preferred:
-            print(f"  ✓ 선호 호텔 사용: {preferred}")
+            print(f"  ✓ 선호 호텔 사용: {preferred} (숙박비 미확인)")
             return {
                 "hotel_name": preferred,
                 "hotel_address": "",
                 "hotel_cost": 0,
-                "remaining_budget": intent["budget"],
+                "remaining_budget": after_flight,
                 "hotel_candidates": [],
             }
 
-        # Case 2: 선호 없음 → 예산 60% 이내 TOP 3 검색
-        max_budget = int(intent["budget"] * HOTEL_BUDGET_RATIO)
-        max_per_night = max_budget // max(intent.get("trip_nights", 1), 1)
-        print(f"  → 선호 호텔 없음. 1박 최대 {max_per_night:,}원 이내 후보 검색 중...")
+        # Case 2: 선호 없음 → 잔여 예산 기반 검색
+        # 항공비가 이미 차감된 경우: 잔여의 90% 숙박 배분
+        # 항공비 미확정(0)인 경우: 총 예산의 HOTEL_BUDGET_RATIO% 배분 (항공비 몫 확보)
+        if flight_cost > 0:
+            max_hotel_total = max(int(after_flight * 0.9), 0)
+        else:
+            max_hotel_total = int(budget * HOTEL_BUDGET_RATIO)
+            print(f"  △ 항공비 미확정 — 총 예산의 {int(HOTEL_BUDGET_RATIO*100)}%를 숙박 상한으로 설정")
+
+        max_per_night = max_hotel_total // nights
+        print(f"  → 숙박 가용 {max_hotel_total:,}원 ({nights}박) → 1박 상한 {max_per_night:,}원")
 
         candidates = search_hotel_candidates(intent, max_per_night, limit=10)
 
-        # interrupt() — 그래프 일시 중단, 유저에게 선택지 전달
         choice = interrupt({
             "type": "hotel_selection",
             "question": (
                 f"숙소를 선택해주세요 "
-                f"(총 예산 {intent['budget']:,}원의 {HOTEL_BUDGET_RATIO*100:.0f}% 이내 추천):"
+                f"(1박 {max_per_night:,}원 이하 기준, {nights}박 총액 {max_hotel_total:,}원 이내):"
             ),
             "candidates": candidates,
         })
 
-        # 재개 후 선택 처리 (choice: "1", "2", "3" 또는 정수)
         try:
             idx = int(choice) - 1
             if not (0 <= idx < len(candidates)):
@@ -152,14 +170,19 @@ def make_stay_node():
             idx = 0
 
         chosen = candidates[idx]
-        cost = chosen["cost"]
-        print(f"  ✓ 선택된 숙소: {chosen['name']} | {cost:,}원 | 잔여: {intent['budget']-cost:,}원")
+        # hotel cost = 총 숙박비 (nights 기준 total_rate 또는 per_night * nights)
+        hotel_cost = chosen["cost"]
+        remaining = budget - flight_cost - hotel_cost
+        print(
+            f"  ✓ 선택: {chosen['name']} | 숙박 {hotel_cost:,}원({nights}박) | "
+            f"잔여 예산: {budget:,} - {flight_cost:,}(항공) - {hotel_cost:,}(숙박) = {remaining:,}원"
+        )
 
         return {
             "hotel_name": chosen["name"],
             "hotel_address": chosen.get("address", ""),
-            "hotel_cost": cost,
-            "remaining_budget": intent["budget"] - cost,
+            "hotel_cost": hotel_cost,
+            "remaining_budget": remaining,
             "hotel_candidates": candidates,
         }
 

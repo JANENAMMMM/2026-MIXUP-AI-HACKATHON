@@ -283,7 +283,7 @@ def _score_flight(
 
     time_label = _TIME_LABEL.get(tc, "시간미정")
     stops_label = "직항" if flight.stops == 0 else f"경유 {flight.stops}회"
-    reason = f"항공 {flight.price:,}원 · {stops_label} · {time_label}"
+    reason = f"항공(1인/왕복) {flight.price:,}원 · {stops_label} · {time_label}"
     return round(total, 2), reason
 
 
@@ -307,7 +307,7 @@ def _display_top10(candidates: list[dict], dest: str, trip_nights: int) -> None:
             tc = (c.get("time_category") or "").upper()
             time_str = _TIME_LABEL.get(tc, "시간미정")
 
-        price_str = f"{c['flight_price']:,}원" if c["flight_price"] else "-"
+        price_str = f"{c['flight_price']:,}원(1인)" if c["flight_price"] else "-"
         weather_short = c.get("weather_summary", "")
         star = "★★★" if i == 1 else ("★★" if i <= 3 else "★")
         return_date = c.get("check_out", "")
@@ -367,7 +367,9 @@ def make_date_optimizer_node():
         if not flights:
             print("  ✗ 항공권 조회 실패 — 날씨 기반 추천으로 전환")
             return _weather_only_candidates(dest, trip_nights, today, intent)
-        print(f"  ✓ 항공권 {len(flights)}건 조회 완료")
+        print(f"  ✓ 항공권 {len(flights)}건 조회 완료 (가격은 성인 1인 왕복 기준, 예산에는 {intent.get('adults', 1)}인 총액으로 차감)")
+
+        adults = intent.get("adults", 1)
 
         # 1단계: 가격 + 경유 + 시간대만으로 빠른 사전 점수 계산 (날씨 API 호출 없음)
         _WEATHER_TOP_N = 10
@@ -416,7 +418,6 @@ def make_date_optimizer_node():
 
         _display_top10(top10, dest, trip_nights)
 
-        top3 = top10[:3]
         choice_str = interrupt({
             "type": "date_selection",
             "question": f"{dest} 여행 날짜를 선택해주세요 (항공권+날씨 분석 결과):",
@@ -431,18 +432,18 @@ def make_date_optimizer_node():
                     "airline_name": c.get("airline_name", ""),
                     "stops": c.get("stops", -1),
                 }
-                for c in top3
+                for c in top10
             ],
         })
 
         try:
             selected_idx = int(str(choice_str)) - 1
-            if not (0 <= selected_idx < len(top3)):
+            if not (0 <= selected_idx < len(top10)):
                 selected_idx = 0
         except (ValueError, TypeError):
             selected_idx = 0
 
-        selected = top3[selected_idx]
+        selected = top10[selected_idx]
 
         # 선택된 1건만 SerpAPI로 출발/도착 시각 enrichment (이미 있으면 스킵)
         if not selected.get("departure_time"):
@@ -456,6 +457,8 @@ def make_date_optimizer_node():
         updated_intent = dict(intent)
         updated_intent["check_in"] = selected["check_in"]
         updated_intent["check_out"] = selected["check_out"]
+        # Naver minPrice / SerpAPI price 모두 성인 1인 왕복 기준 → adults 곱해 총 항공비 산출
+        updated_intent["flight_cost"] = selected["flight_price"] * updated_intent.get("adults", 1)
 
         # weather_node가 재호출하지 않도록 날씨 데이터를 미리 채워 넘긴다
         full_weather = selected.get("weather_full", "")

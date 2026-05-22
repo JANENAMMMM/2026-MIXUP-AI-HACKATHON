@@ -13,6 +13,7 @@ class TravelIntent(TypedDict):
     target_months: list     # 검색 대상 월 목록 (예: ["202607"]) — date_fixed=False일 때 사용
     prefer_nonstop: bool    # True면 직항 선호 → 경유 감점 폭 증가
     preferred_hotel: str | None  # 사용자가 명시한 선호 호텔명 (없으면 null)
+    flight_cost: int        # 선택된 항공권 가격 (왕복, 옵션)
 
 
 class AgentState(TypedDict):

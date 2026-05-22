@@ -71,6 +71,7 @@ def make_intent_router(llm):
             "target_months": target_months,
             "prefer_nonstop": prefer_nonstop,
             "preferred_hotel": preferred_hotel,
+            "flight_cost": 0,  # date_optimizer에서 채워짐
         }
         date_str = f"{check_in} ~ {check_out}" if date_fixed else "미정"
         print(f"  ✓ 목적지: {intent['destination']} | 날짜: {date_str} | 예산: {intent['budget']:,}원 | {trip_nights}박")
