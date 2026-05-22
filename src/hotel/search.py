@@ -5,7 +5,6 @@ from .models import HotelSearchRequest, Hotel, HotelSearchResult
 
 API_URL = "https://serpapi.com/search.json"
 
-
 def search_google_hotels(api_key: str, request: HotelSearchRequest) -> HotelSearchResult:
     """Google Hotels API로 호텔을 검색한다.
 
