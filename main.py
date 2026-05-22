@@ -19,6 +19,8 @@ def main() -> None:
         result = app.invoke({
             "messages": [HumanMessage(content=user_input)],
             "intent": None,
+            "date_fixed": True,
+            "candidate_dates": [],
             "is_rainy": False,
             "weather_summary": "",
             "hotel_name": "",
