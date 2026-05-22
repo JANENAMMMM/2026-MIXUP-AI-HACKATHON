@@ -286,31 +286,37 @@ def _score_flight(
 
 
 def _display_top10(candidates: list[dict], dest: str, trip_nights: int) -> None:
-    print(f"\n{'─'*82}")
-    print(f"  🗓️  {dest} 추천 여행 날짜 TOP {len(candidates)} ({trip_nights}박 기준)")
-    print(f"{'─'*82}")
-    print(f"  {'No':>2}  {'출발날짜':^10}  {'출발시간':^8}  {'항공사':<12}  {'가격':>11}  {'경유':^4}  {'추천'}")
-    print(f"  {'─'*2}  {'─'*10}  {'─'*8}  {'─'*12}  {'─'*11}  {'─'*4}  {'─'*4}")
+    print(f"\n{'─'*90}")
+    print(f"  🗓️  {dest} 왕복 항공권 추천 TOP {len(candidates)} ({trip_nights}박 기준, 가격은 왕복 기준)")
+    print(f"{'─'*90}")
+    print(f"  {'No':>2}  {'출발':^10}  {'귀국':^10}  {'출발→도착':^13}  {'항공사':<12}  {'왕복가격':>11}  {'경유':^6}  {'추천'}")
+    print(f"  {'─'*2}  {'─'*10}  {'─'*10}  {'─'*13}  {'─'*12}  {'─'*11}  {'─'*6}  {'─'*4}")
     for i, c in enumerate(candidates, 1):
         stops_label = "직항" if c.get("stops", 1) == 0 else f"경유{c.get('stops', 1)}회"
         airline = c.get("airline_name") or _airline_label(c.get("airline_codes", []))
+
         dep_time = c.get("departure_time", "")
-        # 실제 시각이 없으면 time_category 레이블로 대체
+        arr_time = c.get("arrival_time", "")
         if dep_time:
             dep_str = dep_time.split(" ")[-1]
+            arr_str = arr_time.split(" ")[-1] if arr_time else "?"
+            time_str = f"{dep_str}→{arr_str}"
         else:
             tc = (c.get("time_category") or "").upper()
-            dep_str = _TIME_LABEL.get(tc, "시간미정")
+            time_str = _TIME_LABEL.get(tc, "시간미정")
+
         price_str = f"{c['flight_price']:,}원" if c["flight_price"] else "-"
         weather_short = c.get("weather_summary", "")
-        # 추천 등급: 1위=★★★, 2-3위=★★, 나머지=★
         star = "★★★" if i == 1 else ("★★" if i <= 3 else "★")
+        return_date = c.get("check_out", "")
+        # MM/DD 형식으로 짧게 표시
+        ret_short = return_date[5:] if return_date else "?"
         print(
-            f"  {i:>2}  {c['check_in']:^10}  {dep_str:^8}  {airline:<12}  "
+            f"  {i:>2}  {c['check_in']:^10}  {ret_short:^10}  {time_str:^13}  {airline:<12}  "
             f"{price_str:>11}  {stops_label:^6}  {star}"
         )
         print(f"      날씨: {weather_short}")
-    print(f"{'─'*82}")
+    print(f"{'─'*90}")
 
 
 def _prompt_selection(candidates: list[dict]) -> int:

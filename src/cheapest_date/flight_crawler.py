@@ -281,17 +281,34 @@ def get_cheapest_dates(
         naver_orig, naver_dest, months, is_nonstop, top_n, naver_orig_type, naver_dest_type
     )
 
-    if results:
+    _NAVER_MIN = 5  # 이 미만이면 SerpAPI로 보충
+    trip_nights = max(trip_days) - 1 if trip_days else 4
+
+    if len(results) >= _NAVER_MIN:
         print(f"  ✓ 네이버 API: {len(results)}개 날짜, 최저 {results[0].price:,}원 ({results[0].date})")
         return results
 
-    print("  ✗ 네이버 API 빈 응답 → SerpAPI fallback 시도...")
-    trip_nights = max(trip_days) - 1 if trip_days else 4
-    results = _serpapi_cheapest_dates(origin, destination, months, trip_nights, min(top_n, 10))
+    if results:
+        print(f"  △ 네이버 API: {len(results)}건 (부족) → SerpAPI 보충 조회...")
+    else:
+        print("  ✗ 네이버 API 빈 응답 → SerpAPI fallback 시도...")
+
+    serpapi_results = _serpapi_cheapest_dates(origin, destination, months, trip_nights, min(top_n, 10))
+
+    if serpapi_results:
+        # Naver + SerpAPI 합산, 중복 날짜는 더 싼 것만 유지
+        combined: dict[str, FlightPrice] = {f.date: f for f in serpapi_results}
+        for f in results:
+            if f.date not in combined or f.price < combined[f.date].price:
+                combined[f.date] = f
+        merged = sorted(combined.values(), key=lambda f: f.price)
+        print(f"  ✓ 합산 결과: {len(merged)}개 날짜, 최저 {merged[0].price:,}원 ({merged[0].date})")
+        return merged[:top_n]
 
     if results:
-        print(f"  ✓ SerpAPI fallback: {len(results)}개 날짜 조회 완료")
-    else:
-        print("  ✗ SerpAPI fallback도 실패")
+        print(f"  △ SerpAPI도 실패, 네이버 {len(results)}건만 사용")
+        print(f"  ✓ 네이버 API: {len(results)}개 날짜, 최저 {results[0].price:,}원 ({results[0].date})")
+        return results
 
-    return results
+    print("  ✗ 모든 API 실패")
+    return []
