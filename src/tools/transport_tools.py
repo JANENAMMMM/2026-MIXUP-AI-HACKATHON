@@ -8,9 +8,7 @@ from langchain_core.tools import tool
 from transport.flights import search_flights
 from transport.transit import search_transit
 
-# ⚠️ 새로 만드신 네이버 항공권 크롤러 파일 이름에 맞게 아래 임포트 문을 수정해주세요. 
-# (예: 파일명이 naver_flight.py 인 경우)
-from transport.naver_flight import get_cheapest_dates
+from cheapest_date.flight_crawler import get_cheapest_dates
 
 
 # ==========================================
