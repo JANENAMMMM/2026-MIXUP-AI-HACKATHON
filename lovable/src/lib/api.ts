@@ -39,6 +39,10 @@ export interface DateCandidate {
 export interface HotelCandidate {
   name: string;
   address: string;
+  description: string;
+  image_url: string;
+  amenities: string[];
+  details_link: string;
   cost: number;
   rating: number;
 }

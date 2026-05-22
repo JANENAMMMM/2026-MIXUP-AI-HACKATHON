@@ -744,37 +744,92 @@ function HotelProposalCard({
   const [selected, setSelected] = useState("1");
 
   return (
-    <Card className="ml-10 max-w-[85%] gap-3 p-4 shadow-sm animate-scale-in">
+    <Card className="ml-10 max-w-[90%] gap-3 p-4 shadow-sm animate-scale-in">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Hotel className="h-4 w-4 text-muted-foreground" />
         {question}
       </div>
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid gap-3">
         {candidates.map((h, i) => {
           const idx = String(i + 1);
+          const isSelected = selected === idx;
           return (
             <button
               key={idx}
               onClick={() => setSelected(idx)}
               className={cn(
-                "flex flex-col items-start gap-1.5 rounded-lg border bg-card p-3 text-left transition",
-                selected === idx
+                "flex flex-col items-start gap-2 rounded-lg border bg-card p-3 text-left transition",
+                isSelected
                   ? "border-foreground/60 ring-1 ring-foreground/20"
                   : "border-border hover:border-foreground/30",
               )}
             >
-              <div className="text-sm font-medium leading-tight">{h.name}</div>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                {h.rating > 0 && (
-                  <span className="flex items-center gap-0.5">
-                    <Star className="h-3 w-3 fill-current text-amber-500" />
-                    {h.rating}
+              {/* 헤더 행 */}
+              <div className="flex w-full items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+                    isSelected ? "bg-foreground text-background" : "bg-muted text-muted-foreground",
+                  )}>
+                    {idx}
                   </span>
-                )}
-                {h.cost > 0 && <span>{won(h.cost)}</span>}
+                  <span className="text-sm font-semibold leading-tight">{h.name}</span>
+                </div>
+                <div className="shrink-0 text-right">
+                  {h.cost > 0 && (
+                    <div className="text-sm font-semibold tabular-nums">{won(h.cost)}</div>
+                  )}
+                  {h.rating > 0 && (
+                    <div className="flex items-center justify-end gap-0.5 text-xs text-muted-foreground">
+                      <Star className="h-3 w-3 fill-current text-amber-500" />
+                      {h.rating}
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {/* 주소 */}
               {h.address && (
-                <div className="text-[11px] text-muted-foreground line-clamp-1">{h.address}</div>
+                <div className="flex items-start gap-1 text-xs text-muted-foreground">
+                  <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
+                  <span className="line-clamp-1">{h.address}</span>
+                </div>
+              )}
+
+              {/* 설명 */}
+              {h.description && (
+                <p className="text-xs text-foreground/80 leading-relaxed line-clamp-2">
+                  {h.description}
+                </p>
+              )}
+
+              {/* 편의시설 태그 */}
+              {h.amenities?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {h.amenities.map((a) => (
+                    <span
+                      key={a}
+                      className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground"
+                    >
+                      {a}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* 상세 링크 */}
+              {h.details_link && h.details_link !== "https://example.com/mock1"
+                && h.details_link !== "https://example.com/mock2"
+                && h.details_link !== "https://example.com/mock3" && (
+                <a
+                  href={h.details_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80"
+                >
+                  상세 정보 보기 →
+                </a>
               )}
             </button>
           );
