@@ -4,12 +4,13 @@ from langgraph.graph.message import add_messages
 
 
 class TravelIntent(TypedDict):
-    destination: str        # 목적지 (예: "부산")
+    destination: str        # 목적지 (예: "런던")
     check_in: str           # 체크인 날짜 YYYY-MM-DD (date_fixed=False면 빈 문자열)
     check_out: str          # 체크아웃 날짜 YYYY-MM-DD
     budget: int             # 총 예산 (원)
     adults: int             # 인원
-    trip_nights: int        # 숙박 일수 (날짜 미정일 때 기준값)
+    trip_nights: int        # 숙박 일수
+    target_months: list     # 검색 대상 월 목록 (예: ["202607"]) — date_fixed=False일 때 사용
 
 
 class AgentState(TypedDict):

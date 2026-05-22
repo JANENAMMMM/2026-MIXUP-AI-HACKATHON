@@ -52,14 +52,18 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             "너는 여행 정보 추출 AI야. 사용자 입력에서 아래 JSON을 추출해.\n"
             "규칙:\n"
             "- 날짜가 'M/D' 형식이면 올해 연도를 붙여 'YYYY-MM-DD'로 변환.\n"
-            "- 날짜가 전혀 언급되지 않거나 '미정'/'언제가 좋을지' 등이면 date_fixed=false, check_in='', check_out='' 로 설정.\n"
-            "- 숙박 기간이 언급되면 trip_nights에 설정 (예: '2박3일' → 3). 없으면 2.\n"
+            "- 날짜가 정확히 확정된 경우에만 date_fixed=true.\n"
+            "- '7월 중', '여름에', '대충 7월', '7월쯤', '8월 초' 처럼 월이나 시기만 언급되면 "
+            "date_fixed=false, target_months에 해당 월을 'YYYYMM' 형식으로 설정.\n"
+            "- 날짜가 전혀 없거나 '미정'이면 date_fixed=false, target_months=[].\n"
+            "- date_fixed=false면 check_in='', check_out='' 로 설정.\n"
+            "- 숙박 기간이 언급되면 trip_nights에 설정 (예: '3박4일' → 3, '2박' → 2). 없으면 2.\n"
             "- 예산 단위가 '만원'이면 10000 곱해 정수로 변환.\n"
             "- 인원 정보 없으면 adults=1.\n"
             f"- 오늘 날짜: {today}\n\n"
             "반드시 아래 JSON 형식만 출력 (설명 없이):\n"
-            '{"destination":"부산","date_fixed":true,"check_in":"2026-05-30",'
-            '"check_out":"2026-05-31","budget":500000,"adults":1,"trip_nights":2}'
+            '{"destination":"런던","date_fixed":false,"check_in":"","check_out":"",'
+            '"budget":3000000,"adults":1,"trip_nights":3,"target_months":["202607"]}'
         ))
 
         print("\n🧠 [1/5] 의도 분석 중...")
@@ -81,6 +85,8 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             check_in = ""
             check_out = ""
 
+        target_months: list = data.get("target_months", [])
+
         intent: TravelIntent = {
             "destination": data.get("destination", "서울"),
             "check_in": check_in,
@@ -88,6 +94,7 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             "budget": int(data.get("budget", 500000)),
             "adults": int(data.get("adults", 1)),
             "trip_nights": trip_nights,
+            "target_months": target_months,
         }
         date_str = f"{check_in} ~ {check_out}" if date_fixed else "미정"
         print(f"  ✓ 목적지: {intent['destination']} | 날짜: {date_str} | 예산: {intent['budget']:,}원 | {trip_nights}박")
@@ -117,18 +124,21 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
         domestic = iata_is_domestic(iata_dest)
         print(f"  → {iata_origin} → {iata_dest} ({'국내선' if domestic else '국제선'}), {trip_nights}박 기준")
 
-        # 다음 달부터 3개월치 월 목록
-        months = []
-        for i in range(1, 4):
-            m = (today.replace(day=1) + timedelta(days=32 * i)).replace(day=1)
-            months.append(m.strftime("%Y%m"))
-        print(f"  → 조회 기간: {months}")
+        # 후보 날짜 생성: target_months 기준, 없으면 다음 달~3개월
+        target_months: list = intent.get("target_months") or []
+        if not target_months:
+            for i in range(1, 4):
+                m = (today.replace(day=1) + timedelta(days=32 * i)).replace(day=1)
+                target_months.append(m.strftime("%Y%m"))
+
+        candidate_dates = _make_candidate_dates(target_months, today)
+        print(f"  → 후보 날짜 {len(candidate_dates)}개: {candidate_dates[0]} ~ {candidate_dates[-1]}")
 
         flights = get_cheapest_dates(
             origin=iata_origin,
             destination=iata_dest,
-            months=months,
-            trip_days=[trip_nights + 1],  # 2박3일 → trip_days=3
+            candidate_dates=candidate_dates,
+            trip_nights=trip_nights,
             is_domestic=domestic,
             top_n=10,
         )
@@ -200,6 +210,19 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             "date_fixed": True,
         }
 
+    def _make_candidate_dates(target_months: list[str], today: date_type) -> list[str]:
+        """target_months에서 4일 간격 후보 날짜 최대 8개를 생성한다."""
+        from datetime import date as date_cls
+        candidates = []
+        for month_str in target_months:
+            year, month = int(month_str[:4]), int(month_str[4:])
+            d = date_cls(year, month, 1)
+            while d.month == month and len(candidates) < 8:
+                if (d - today).days > 7:
+                    candidates.append(d.isoformat())
+                d += timedelta(days=4)
+        return candidates or [(today + timedelta(days=30)).isoformat()]
+
     def _weather_only_candidates(dest: str, trip_nights: int, today: date_type, intent: TravelIntent) -> dict:
         """항공 API 실패 시 날씨만으로 단기 예보 범위 내 최적 날짜 3개를 추천한다."""
         # 단기 예보 한계(D+14)까지만 탐색 — D+15 이상은 데이터 없을 수 있음
@@ -263,19 +286,23 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
                 result = get_weather(dest, target_date, silent=True)
                 if result and result.daily and result.daily.temp_max is not None:
                     d = result.daily
-                    prob = d.precipitation_probability_max or 0
-                    rain = d.rain_sum or 0
-                    if prob >= 50 or rain > 1.0:
+                    prob = d.precipitation_probability_max  # 시즌 예보는 None
+                    rain = d.rain_sum or d.precipitation_sum or 0
+                    if (prob is not None and prob >= 50) or rain > 1.0:
                         any_rainy = True
-                    line = (
-                        f"{target_date}: 최고 {d.temp_max}°C / 최저 {d.temp_min}°C, "
-                        f"강수확률 {prob}%, 강우량 {rain}mm"
-                    )
+
+                    # 이용 가능한 필드만 포함
+                    parts = [f"{target_date}:"]
+                    parts.append(f"최고 {d.temp_max}°C / 최저 {d.temp_min}°C")
+                    if prob is not None:
+                        parts.append(f"강수확률 {prob:.0f}%")
+                    if rain:
+                        parts.append(f"강우 {rain:.1f}mm")
+                    line = " ".join(parts)
                     daily_summaries.append(line)
                     print(f"  ✓ {line}")
                 else:
-                    daily_summaries.append(f"{target_date}: 날씨 정보 없음")
-                    print(f"  ✗ {target_date}: 데이터 없음 (예보 범위 초과 가능)")
+                    print(f"  ✗ {target_date}: 예보 없음 (범위 초과)")
             except Exception as e:
                 daily_summaries.append(f"{target_date}: 조회 실패")
                 print(f"  ✗ {target_date}: 오류 - {e}")

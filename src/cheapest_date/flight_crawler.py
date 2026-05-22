@@ -1,156 +1,97 @@
 # -*- coding: utf-8 -*-
-"""네이버 항공권 GraphQL API를 통해 날짜별 최저가를 조회한다."""
+"""SerpAPI Google Flights를 통해 후보 날짜별 항공권 최저가를 조회한다."""
 
 import os
+from datetime import datetime, timedelta
 
 import requests
-from dotenv import load_dotenv
 
 from .models import FlightPrice
 
-load_dotenv()
-
-_URL = "https://flight-api.naver.com/graphql"
-
-
-def _build_headers() -> dict:
-    headers = {
-        "accept": "application/json, text/plain, */*",
-        "accept-language": "ko-KR,ko;q=0.9",
-        "content-type": "application/json",
-        "origin": "https://flight.naver.com",
-        "referer": "https://flight.naver.com/",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-site",
-    }
-    cookie = os.getenv("NAVER_FLIGHT_COOKIE")
-    if cookie:
-        headers["cookie"] = cookie
-    return headers
-
-_QUERY = (
-    "query GET_RECOMMEND_BY_CITY("
-    "$departureLocationCode: String, $departureLocationType: String, "
-    "$arrivalLocationCode: String, $arrivalLocationType: String, "
-    "$continentIds: [Int!], $countryCodes: [String!], "
-    "$departureDate: String, $returnDate: String, "
-    "$departureMonths: [String!], $duration: [Int!], "
-    "$isDomestic: Boolean, $isMappable: Boolean, $isNonstop: Boolean, "
-    "$price: [Int!], $timeCategories: [DepartureTimeCategory!], "
-    "$themeIds: [Int!], $tripDays: [Int!], $tripType: String"
-    ") {\n"
-    "  minPricesByDate(\n"
-    "    departureLocationCode: $departureLocationCode\n"
-    "    departureLocationType: $departureLocationType\n"
-    "    arrivalLocationCode: $arrivalLocationCode\n"
-    "    arrivalLocationType: $arrivalLocationType\n"
-    "    continentIds: $continentIds\n"
-    "    countryCodes: $countryCodes\n"
-    "    departureDate: $departureDate\n"
-    "    returnDate: $returnDate\n"
-    "    departureMonths: $departureMonths\n"
-    "    duration: $duration\n"
-    "    isDomestic: $isDomestic\n"
-    "    isMappable: $isMappable\n"
-    "    isNonstop: $isNonstop\n"
-    "    price: $price\n"
-    "    themeIds: $themeIds\n"
-    "    timeCategories: $timeCategories\n"
-    "    tripDays: $tripDays\n"
-    "    tripType: $tripType\n"
-    "  ) {\n"
-    "    departureLocation { iataCode cityName popularity __typename }\n"
-    "    arrivalLocation { iataCode cityName popularity __typename }\n"
-    "    departureDate\n"
-    "    airlineCodes\n"
-    "    duration\n"
-    "    isDomestic\n"
-    "    minPrice\n"
-    "    returnDate\n"
-    "    stops\n"
-    "    timeCategory\n"
-    "    tripDays\n"
-    "    tripType\n"
-    "    __typename\n"
-    "  }\n"
-    "}"
-)
-
-
-def _to_iso(date_str: str) -> str:
-    """'20260525' → '2026-05-25'"""
-    return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+_SERPAPI_URL = "https://serpapi.com/search.json"
 
 
 def get_cheapest_dates(
     origin: str,
     destination: str,
-    months: list[str],
-    trip_days: list[int],
-    is_nonstop: bool = False,
+    candidate_dates: list[str],
+    trip_nights: int,
     is_domestic: bool = False,
-    top_n: int = 50,
-    origin_type: str = "airport",
-    destination_type: str = "airport",
+    top_n: int = 10,
+    api_key: str | None = None,
 ) -> list[FlightPrice]:
-    """네이버 항공권 추천 일정 API로 날짜별 최저가를 조회한다.
+    """SerpAPI Google Flights로 후보 날짜별 왕복 최저가를 조회한다.
 
     Args:
-        origin:           출발 공항 IATA 코드 (예: 'ICN')
-        destination:      도착 공항 IATA 코드 (예: 'LHR')
-        months:           조회 월 목록 (예: ['202606', '202607', '202608', '202609'])
-        trip_days:        여행 일수 목록 1~15 (예: [4] → 3박4일)
-        is_nonstop:       True면 직항만 조회
-        top_n:            반환할 최저가 결과 수 (클라이언트 필터 후)
-        origin_type:      출발지 타입 ('airport' | 'city')
-        destination_type: 도착지 타입 ('airport' | 'city')
+        origin:          출발 공항 IATA 코드 (예: 'ICN')
+        destination:     도착 공항 IATA 코드 (예: 'LHR')
+        candidate_dates: 조회할 출발 날짜 목록 (YYYY-MM-DD)
+        trip_nights:     숙박 일수 (귀국일 = 출발일 + trip_nights)
+        is_domestic:     국내선 여부 (SerpAPI google_flights 국내선 미지원 → 빈 리스트)
+        top_n:           반환할 최대 결과 수
+        api_key:         SerpAPI 키 (없으면 환경변수 SERPAPI_KEY 사용)
 
     Returns:
-        trip_days에 해당하는 결과를 minPrice 오름차순 상위 top_n개로 반환.
-        요청 실패 시 빈 리스트 반환.
-
-    Note:
-        tripDays는 서버에서 무시되므로 variables에서 제외하고 클라이언트에서 필터링한다.
+        가격 오름차순 FlightPrice 리스트. 키 없거나 국내선이면 빈 리스트.
     """
-    payload = {
-        "operationName": "GET_RECOMMEND_BY_CITY",
-        "variables": {
-            "departureLocationCode": origin,
-            "departureLocationType": origin_type,
-            "arrivalLocationCode": destination,
-            "arrivalLocationType": destination_type,
-            "departureMonths": months,
-            "isDomestic": is_domestic,
-            "isNonstop": is_nonstop,
-            "tripType": "RT",
-        },
-        "query": _QUERY,
-    }
-
-    try:
-        res = requests.post(_URL, headers=_build_headers(), json=payload, timeout=10)
-        res.raise_for_status()
-    except requests.RequestException as e:
-        print(f"[flight_crawler] 요청 실패: {e}")
+    if is_domestic:
         return []
 
-    raw = res.json().get("data", {}).get("minPricesByDate") or []
+    key = api_key or os.getenv("SERPAPI_KEY")
+    if not key:
+        return []
 
-    results = [
-        FlightPrice(
-            date=_to_iso(item["departureDate"]),
-            return_date=_to_iso(item["returnDate"]),
-            price=item["minPrice"],
-            stops=item.get("stops", 0),
-            duration=item.get("duration", 0),
-            airline_codes=item.get("airlineCodes", []),
-            trip_days=item.get("tripDays", 0),
-        )
-        for item in raw
-        if item.get("minPrice") and item.get("tripDays") in trip_days
-    ]
+    results = []
+    for outbound in candidate_dates:
+        return_date = (
+            datetime.strptime(outbound, "%Y-%m-%d") + timedelta(days=trip_nights)
+        ).strftime("%Y-%m-%d")
+
+        price = _fetch_price(origin, destination, outbound, return_date, key)
+        if price:
+            results.append(FlightPrice(
+                date=outbound,
+                return_date=return_date,
+                price=price,
+                trip_days=trip_nights + 1,
+            ))
 
     results.sort(key=lambda f: f.price)
     return results[:top_n]
+
+
+def _fetch_price(
+    origin: str,
+    destination: str,
+    outbound_date: str,
+    return_date: str,
+    api_key: str,
+) -> int | None:
+    """SerpAPI google_flights로 특정 날짜 왕복 최저가를 반환한다."""
+    params = {
+        "engine": "google_flights",
+        "departure_id": origin,
+        "arrival_id": destination,
+        "outbound_date": outbound_date,
+        "return_date": return_date,
+        "currency": "KRW",
+        "hl": "ko",
+        "type": "2",   # 왕복
+        "api_key": api_key,
+    }
+    try:
+        resp = requests.get(_SERPAPI_URL, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        lowest = data.get("price_insights", {}).get("lowest_price")
+        if lowest:
+            return int(lowest)
+
+        for key_name in ("best_flights", "other_flights"):
+            flights = data.get(key_name, [])
+            if flights and flights[0].get("price"):
+                return int(flights[0]["price"])
+    except Exception as e:
+        print(f"    ✗ {outbound_date}: {e}")
+    return None
