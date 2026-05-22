@@ -8,10 +8,6 @@ from langchain_core.tools import tool
 from transport.flights import search_flights
 from transport.transit import search_transit
 
-# ⚠️ 새로 만드신 네이버 항공권 크롤러 파일 이름에 맞게 아래 임포트 문을 수정해주세요. 
-# (예: 파일명이 naver_flight.py 인 경우)
-from transport.naver_flight import get_cheapest_dates
-
 
 # ==========================================
 # 1. 특정 날짜 항공권 검색 Tool (Google Flights)
@@ -25,8 +21,12 @@ class FlightSearchArgs(BaseModel):
 @tool(args_schema=FlightSearchArgs)
 def tool_search_flights(departure_id: str, arrival_id: str, outbound_date: str, return_date: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    사용자가 '특정 날짜'를 지정하여 출발지와 도착지 간의 최적 항공편을 검색할 때 사용합니다.
-    (날짜가 아직 정해지지 않았다면 이 도구 대신 tool_get_cheapest_flight_dates를 사용하세요.)
+    사용자가 여행 출발일과 도착일을 확실하게 '픽스(Fix)'한 경우, 출발지와 도착지 간의 최적 항공편을 검색하는 도구입니다.
+
+    [ 필수 행동 지침 ]
+    1. 사용 조건: 여행 날짜가 구체적이고 확정적일 때만 이 도구를 사용하세요. 
+    2. 날짜 미정 처리: 사용자가 "7월 중에", "제일 싼 날짜에" 처럼 날짜를 확정하지 않았다면, 절대 이 도구를 쓰지 말고 `tool_get_cheapest_flight_dates`를 사용하세요.
+    3. 예산 연동 (Budget Balancing): 이 도구로 도출된 항공권 가격(price)은 유저의 '총 예산'에서 가장 먼저 차감되어야 합니다. 검색 결과를 바탕으로 잔여 예산을 계산하여 다음 에이전트(Stay, Place)가 사용할 수 있도록 상태(State)에 기록하세요.
     """
     try:
         result = search_flights(
@@ -52,65 +52,22 @@ def tool_search_flights(departure_id: str, arrival_id: str, outbound_date: str, 
 
 
 # ==========================================
-# 2. 날짜 미정 최저가 항공권 검색 Tool (Naver Flights)
-# ==========================================
-class CheapestFlightDatesArgs(BaseModel):
-    origin: str = Field(..., description="출발 공항 IATA 코드 (예: 'ICN')")
-    destination: str = Field(..., description="도착 공항 IATA 코드 (예: 'NRT', 'LHR')")
-    months: List[str] = Field(..., description="조회할 연월 목록 (반드시 YYYYMM 형식의 문자열 배열이어야 함. 예: ['202606', '202607'])")
-    trip_days: List[int] = Field(..., description="원하는 여행 일수 배열 (예: 3박 4일 일정이라면 [4] 입력)")
-    is_nonstop: bool = Field(default=False, description="직항만 검색할지 여부 (기본값: False)")
-
-@tool(args_schema=CheapestFlightDatesArgs)
-def tool_get_cheapest_flight_dates(
-    origin: str, 
-    destination: str, 
-    months: List[str], 
-    trip_days: List[int], 
-    is_nonstop: bool = False
-) -> List[Dict[str, Any]]:
-    """
-    사용자가 '날짜 미정' 상태로 가장 저렴한 여행 날짜를 추천해달라고 할 때 사용하는 도구입니다.
-    특정 달(month)과 여행 일수(trip_days)를 기반으로 날짜별 최저가 항공권 상위 5개를 반환합니다.
-    """
-    try:
-        # LLM이 너무 많은 데이터를 받아 컨텍스트가 터지지 않게 상위 5개만 가져옵니다.
-        results = get_cheapest_dates(
-            origin=origin,
-            destination=destination,
-            months=months,
-            trip_days=trip_days,
-            is_nonstop=is_nonstop,
-            top_n=5 
-        )
-        
-        if not results:
-            return [{"message": "조건에 맞는 항공권 최저가 정보를 찾을 수 없습니다."}]
-            
-        # LLM이 읽기 편하게 객체(FlightPrice)를 JSON(dict) 리스트로 변환
-        return [{
-            "departure_date": f.date,
-            "return_date": getattr(f, "return_date", "정보 없음"),
-            "price_krw": f.price,
-            "trip_days": f.trip_days,
-            "airlines": f.airline_codes,
-            "stops": f.stops
-        } for f in results]
-
-    except Exception as e:
-        return [{"error": f"최저가 날짜 검색 중 오류 발생: {str(e)}"}]
-
-
-# ==========================================
-# 3. 대중교통 경로 검색 Tool (Google Transit)
+# 2. 대중교통 경로 검색 Tool (Google Transit)
 # ==========================================
 class TransitSearchArgs(BaseModel):
-    start_addr: str = Field(..., description="출발지 주소 또는 지명")
-    end_addr: str = Field(..., description="도착지 주소 또는 지명")
+    start_addr: str = Field(..., description="출발지 주소 또는 장소명 (예: '해운대 신라스테이', '도쿄 타워')")
+    end_addr: str = Field(..., description="도착지 주소 또는 장소명 (예: '광안리 해수욕장', '시부야 스크램블 교차로')")
 
 @tool(args_schema=TransitSearchArgs)
 def tool_search_transit(start_addr: str, end_addr: str) -> Dict[str, Any]:
-    """두 장소 사이의 대중교통 경로와 예상 소요 시간(분)을 검색합니다."""
+    """
+    [ Routing Optimizer ] 두 장소 사이의 대중교통 최적 경로와 예상 이동 시간(분)을 계산하는 도구입니다.
+
+    [ 필수 행동 지침 ]
+    1. 사용 조건: Place & Dining Agent가 식당과 명소를 모두 찾아낸 후, 최종 일정표를 조립(Synthesizer)하기 위해 각 장소 간의 실제 이동 시간(duration_minutes)을 계산할 때 사용합니다.
+    2. 동선 최적화 (TSP): '숙소 ↔ 명소', '명소 ↔ 식당' 간의 이동 시간을 각각 조회하여, 하루 일정 안에서 길에서 낭비하는 시간이 최소화되도록 동선 순서를 재배치하는 데 이 데이터(duration_minutes)를 활용하세요.
+    3. 정확도: start_addr와 end_addr에는 이전 에이전트들이 검색해둔 장소의 정확한 '이름'이나 '주소'를 입력해야 정확한 이동 시간이 계산됩니다.
+    """
     try:
         result = search_transit(start_addr=start_addr, end_addr=end_addr, max_results=1)
         if getattr(result, "error", None):
