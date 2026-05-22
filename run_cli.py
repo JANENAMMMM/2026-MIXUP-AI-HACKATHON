@@ -17,6 +17,7 @@ def _show_hotel_candidates(interrupt_val: dict) -> str:
     """호텔 후보 목록을 출력하고 사용자 선택(1/2/3)을 받는다."""
     candidates = interrupt_val.get("candidates", [])
     print(f"\n{interrupt_val.get('question', '숙소를 선택해주세요:')}")
+
     for i, h in enumerate(candidates, 1):
         cost_str = f"{h['cost']:,}원" if h.get("cost", 0) > 0 else "가격 미확인"
         rating_str = f" ★{h['rating']}" if h.get("rating") else ""
@@ -27,10 +28,13 @@ def _show_hotel_candidates(interrupt_val: dict) -> str:
             print(f"      주요 특징   : {h['description']}")
         if h.get("amenities"):
             print(f"      편의시설     : {', '.join(h['amenities'])}")
-        if h.get("details_link"):
-            print(f"      상세 링크   : {h['details_link']}")
-        if h.get("image_url"):
-            print(f"      이미지 URL : {h['image_url']}")
+        # 상세 링크와 썸네일은 값이 있을 때만 출력
+        details_link = h.get("details_link")
+        if details_link:
+            print(f"      상세 링크   : {details_link}")
+        image_url = h.get("image_url")
+        if image_url:
+            print(f"      이미지 URL : {image_url}")
 
     while True:
         choice = input(f"\n번호를 선택하세요 (1~{len(candidates)}): ").strip()

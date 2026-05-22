@@ -12,18 +12,30 @@ _MOCK_HOTELS = [
     {
         "name": "해운대 그랜드 호텔 (Mock)",
         "address": "부산광역시 해운대구 해운대해변로 20",
+        "description": "바다 전망과 조식 포함, 도보로 해운대 해변 접근 가능",
+        "image_url": "https://example.com/mock1.jpg",
+        "amenities": ["조식", "Wi-Fi", "피트니스", "무료 주차"],
+        "details_link": "https://example.com/mock1",
         "cost": 150000,
         "rating": 4.5,
     },
     {
         "name": "파크 하얏트 부산 (Mock)",
         "address": "부산광역시 해운대구 해운대해변로 24",
+        "description": "럭셔리 룸과 스파 시설, 도심 최고의 전망 제공",
+        "image_url": "https://example.com/mock2.jpg",
+        "amenities": ["스파", "실내 수영장", "바/라운지", "컨시어지"],
+        "details_link": "https://example.com/mock2",
         "cost": 220000,
         "rating": 4.8,
     },
     {
         "name": "노보텔 앰배서더 부산 (Mock)",
         "address": "부산광역시 해운대구 우동 1411-1",
+        "description": "가족 여행에 적합한 객실과 실내 수영장을 갖춘 합리적 가격대 호텔",
+        "image_url": "https://example.com/mock3.jpg",
+        "amenities": ["실내 수영장", "가족룸", "조식", "무료 Wi-Fi"],
+        "details_link": "https://example.com/mock3",
         "cost": 120000,
         "rating": 4.2,
     },
@@ -82,7 +94,16 @@ def _build_mock(intent: dict) -> list[dict]:
     """Mock 호텔 3곳 반환 (총 비용 기준으로 trip_nights 반영)."""
     nights = max(intent.get("trip_nights", 1), 1)
     return [
-        {**h, "cost": h["cost"] * nights}
+        {
+            "name": h["name"],
+            "address": h.get("address", ""),
+            "description": h.get("description", ""),
+            "image_url": h.get("image_url", ""),
+            "amenities": h.get("amenities", []),
+            "details_link": h.get("details_link", ""),
+            "cost": h["cost"] * nights,
+            "rating": h.get("rating", 0.0),
+        }
         for h in _MOCK_HOTELS
     ]
 
