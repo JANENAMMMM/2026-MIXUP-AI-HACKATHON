@@ -7,7 +7,7 @@ from langchain_core.tools import tool
 # ==========================================
 from transport.flights import search_flights
 from transport.transit import search_transit
-
+from cheapest_date.flight_crawler import get_cheapest_dates
 
 # ==========================================
 # 1. 특정 날짜 항공권 검색 Tool (Google Flights)
