@@ -62,6 +62,7 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             '"check_out":"2026-05-31","budget":500000,"adults":1,"trip_nights":2}'
         ))
 
+        print("\n🧠 [1/5] 의도 분석 중...")
         response = llm.invoke([system, HumanMessage(content=user_msg)])
         raw = response.content.strip()
         if "```" in raw:
@@ -88,6 +89,8 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             "adults": int(data.get("adults", 1)),
             "trip_nights": trip_nights,
         }
+        date_str = f"{check_in} ~ {check_out}" if date_fixed else "미정"
+        print(f"  ✓ 목적지: {intent['destination']} | 날짜: {date_str} | 예산: {intent['budget']:,}원 | {trip_nights}박")
         return {"intent": intent, "date_fixed": date_fixed}
 
     # ── Node 2: Date Optimizer ─────────────────────────────────────────
@@ -104,19 +107,22 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
         today = datetime.now().date()
 
         # IATA 코드 조회
+        print(f"\n🗓️  [날짜 최적화] {dest} 항공권 + 날씨 교차 분석 중...")
         iata_dest = get_iata(dest)
         if not iata_dest:
-            # 매핑 실패 시 다음 달 기준 weather-only fallback
-            return _weather_only_candidates(dest, trip_nights, today)
+            print(f"  ✗ IATA 코드 없음: '{dest}' — 날씨 기반 추천으로 전환")
+            return _weather_only_candidates(dest, trip_nights, today, intent)
 
         iata_origin = "ICN"
         domestic = iata_is_domestic(iata_dest)
+        print(f"  → {iata_origin} → {iata_dest} ({'국내선' if domestic else '국제선'}), {trip_nights}박 기준")
 
         # 다음 달부터 3개월치 월 목록
         months = []
         for i in range(1, 4):
             m = (today.replace(day=1) + timedelta(days=32 * i)).replace(day=1)
             months.append(m.strftime("%Y%m"))
+        print(f"  → 조회 기간: {months}")
 
         flights = get_cheapest_dates(
             origin=iata_origin,
@@ -128,7 +134,9 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
         )
 
         if not flights:
+            print("  ✗ 항공권 조회 실패 — 날씨 기반 추천으로 전환")
             return _weather_only_candidates(dest, trip_nights, today, intent)
+        print(f"  ✓ 항공권 {len(flights)}건 조회 완료")
 
         # 가격 점수: 순위 1위=5점, 10위=0.5점
         max_price = max(f.price for f in flights)
@@ -176,6 +184,9 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         top3 = candidates[:3]
+        print("  ✓ 추천 날짜 TOP 3:")
+        for i, c in enumerate(top3, 1):
+            print(f"    {i}위) {c['check_in']} ~ {c['check_out']} | 점수 {c['score']} | {c['reason']}")
 
         # 1위를 intent에 반영해 이후 노드가 그대로 사용하게 함
         best = top3[0]
@@ -234,30 +245,52 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
 
     # ── Node 3: Weather ────────────────────────────────────────────────
     def weather_node(state: AgentState) -> dict:
+        """체크인~체크아웃 전 기간 날씨를 조회한다."""
         intent = state["intent"]
-        try:
-            result = get_weather(intent["destination"], intent["check_in"], silent=True)
-            if result is None or result.daily is None:
-                return {"is_rainy": False, "weather_summary": "날씨 정보 없음"}
-            d = result.daily
-            prob = d.precipitation_probability_max or 0
-            rain = d.rain_sum or 0
-            is_rainy = prob >= 50 or rain > 1.0
-            summary = (
-                f"{intent['check_in']} {intent['destination']} 날씨: "
-                f"최고 {d.temp_max}°C / 최저 {d.temp_min}°C, "
-                f"강수확률 {prob}%, 강우량 {rain}mm"
-            )
-            return {"is_rainy": is_rainy, "weather_summary": summary}
-        except Exception as e:
-            return {"is_rainy": False, "weather_summary": f"날씨 조회 실패: {e}"}
+        dest = intent["destination"]
+        check_in = datetime.strptime(intent["check_in"], "%Y-%m-%d").date()
+        check_out = datetime.strptime(intent["check_out"], "%Y-%m-%d").date()
+        nights = (check_out - check_in).days
+
+        print(f"\n⛅ [2/5] 날씨 조회 중 — {dest} {intent['check_in']} ~ {intent['check_out']} ({nights}박)")
+
+        daily_summaries = []
+        any_rainy = False
+
+        for i in range(nights + 1):
+            target_date = (check_in + timedelta(days=i)).isoformat()
+            try:
+                result = get_weather(dest, target_date, silent=True)
+                if result and result.daily and result.daily.temp_max is not None:
+                    d = result.daily
+                    prob = d.precipitation_probability_max or 0
+                    rain = d.rain_sum or 0
+                    if prob >= 50 or rain > 1.0:
+                        any_rainy = True
+                    line = (
+                        f"{target_date}: 최고 {d.temp_max}°C / 최저 {d.temp_min}°C, "
+                        f"강수확률 {prob}%, 강우량 {rain}mm"
+                    )
+                    daily_summaries.append(line)
+                    print(f"  ✓ {line}")
+                else:
+                    daily_summaries.append(f"{target_date}: 날씨 정보 없음")
+                    print(f"  ✗ {target_date}: 데이터 없음 (예보 범위 초과 가능)")
+            except Exception as e:
+                daily_summaries.append(f"{target_date}: 조회 실패")
+                print(f"  ✗ {target_date}: 오류 - {e}")
+
+        return {"is_rainy": any_rainy, "weather_summary": "\n".join(daily_summaries)}
 
     # ── Node 4: Stay ───────────────────────────────────────────────────
     def stay_node(state: AgentState) -> dict:
         intent = state["intent"]
         serpapi_key = os.getenv("SERPAPI_KEY")
 
+        print(f"\n🏨 [3/5] 숙소 검색 중 — {intent['destination']} {intent['check_in']} ~ {intent['check_out']}")
+
         if not serpapi_key:
+            print("  ✗ SERPAPI_KEY 없음 → Mock 데이터 사용")
             cost = _MOCK_HOTEL["cost"]
             return {
                 "hotel_name": _MOCK_HOTEL["name"],
@@ -285,13 +318,15 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             if cost < 10000:
                 cost = 0
 
+            print(f"  ✓ {hotel.name} | 원본 가격 문자열: '{raw_cost}' → {cost:,}원 | 잔여: {intent['budget']-cost:,}원")
             return {
                 "hotel_name": hotel.name,
                 "hotel_address": "",
                 "hotel_cost": cost,
                 "remaining_budget": intent["budget"] - cost,
             }
-        except Exception:
+        except Exception as e:
+            print(f"  ✗ SerpApi 실패 ({e}) → Mock 데이터 사용")
             cost = _MOCK_HOTEL["cost"]
             return {
                 "hotel_name": _MOCK_HOTEL["name"],
@@ -310,6 +345,8 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
         iata = get_iata(dest)
         domestic = iata_is_domestic(iata) if iata else False
 
+        print(f"\n📍 [4/5] 장소 검색 중 — {dest} ({'국내→Naver' if domestic else '해외→Google Places'})")
+
         if domestic:
             # ── 국내: Naver Local ──────────────────────────────────────
             r_query = f"{dest} 맛집"
@@ -321,14 +358,17 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
                     for p in places[:2]
                 ]
 
+            print(f"  → 맛집: '{r_query}' / 명소: '{a_query}'")
             try:
                 restaurants = _naver(search_local(r_query, display=2))
-            except Exception:
+            except Exception as e:
+                print(f"  ✗ 맛집 Naver 실패 ({e}) → Mock 사용")
                 restaurants = _MOCK_RESTAURANTS
 
             try:
                 attractions = _naver(search_local(a_query, display=2))
-            except Exception:
+            except Exception as e:
+                print(f"  ✗ 명소 Naver 실패 ({e}) → Mock 사용")
                 attractions = _MOCK_ATTRACTIONS
 
         else:
@@ -344,16 +384,21 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
                     for p in places[:2]
                 ]
 
+            print(f"  → 맛집: '{r_query}' / 명소: '{a_query}'")
             try:
                 restaurants = _google(search_places(r_query))
-            except Exception:
+            except Exception as e:
+                print(f"  ✗ 맛집 Google Places 실패 ({e})")
                 restaurants = []
 
             try:
                 attractions = _google(search_places(a_query))
-            except Exception:
+            except Exception as e:
+                print(f"  ✗ 명소 Google Places 실패 ({e})")
                 attractions = []
 
+        print(f"  ✓ 맛집: {[r['title'] for r in restaurants]}")
+        print(f"  ✓ 명소: {[a['title'] for a in attractions]}")
         return {"restaurants": restaurants, "attractions": attractions}
 
     # ── Node 6: Synthesizer ────────────────────────────────────────────
@@ -395,7 +440,9 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             f"{places_text}"
         )
 
+        print(f"\n📝 [5/5] 일정 생성 중 — Solar Pro3 호출...")
         response = llm.invoke([system, HumanMessage(content=user_content)])
+        print("  ✓ 완료\n")
         return {"final_report": response.content}
 
     # ── Graph 조립 ─────────────────────────────────────────────────────
