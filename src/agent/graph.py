@@ -131,8 +131,13 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             hotel: Hotel = result.hotels[0]
 
             # total_rate 문자열에서 숫자 추출 (예: "₩150,000" → 150000)
+            # SerpApi는 "₩149,800" 또는 "149800" 형식으로 반환
             raw_cost = hotel.total_rate or hotel.rate_per_night or "0"
-            cost = int("".join(filter(str.isdigit, raw_cost)) or 0)
+            digits = "".join(filter(str.isdigit, raw_cost))
+            cost = int(digits) if digits else 0
+            # 자릿수가 너무 적으면(5자리 미만) 단위 오류로 판단해 0 처리
+            if cost < 10000:
+                cost = 0
 
             return {
                 "hotel_name": hotel.name,
