@@ -25,6 +25,52 @@ export interface PlanResult {
   final_report: string;
 }
 
+export interface DateCandidate {
+  check_in: string;
+  check_out: string;
+  weather_summary: string;
+  flight_price: number;
+  score: number;
+  reason: string;
+  airline_name?: string;
+  stops?: number;
+}
+
+export interface HotelCandidate {
+  name: string;
+  address: string;
+  cost: number;
+  rating: number;
+}
+
+export interface StartPlanResult {
+  thread_id: string;
+  phase: "date_selection" | "hotel_selection" | "done";
+  question?: string;
+  candidates?: DateCandidate[] | HotelCandidate[];
+  result?: PlanResult;
+}
+
+export async function startPlan(req: PlanRequest): Promise<StartPlanResult> {
+  const res = await fetch(`${API_BASE}/api/plan/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json() as Promise<StartPlanResult>;
+}
+
+export async function resumePlan(threadId: string, choice: string): Promise<StartPlanResult> {
+  const res = await fetch(`${API_BASE}/api/plan/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ thread_id: threadId, choice }),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json() as Promise<StartPlanResult>;
+}
+
 /**
  * SSE 스트림으로 여행 계획을 요청한다.
  * - onStep: 각 파이프라인 단계 이벤트 (step, status)

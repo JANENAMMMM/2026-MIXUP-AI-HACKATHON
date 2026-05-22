@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { streamPlan } from "@/lib/api";
-import type { PlanResult } from "@/lib/api";
+import { startPlan, resumePlan } from "@/lib/api";
+import MarkdownContent from "./MarkdownContent";
+import type { PlanResult, DateCandidate, HotelCandidate } from "@/lib/api";
 import {
   Send,
   Sparkles,
@@ -15,8 +16,8 @@ import {
   Check,
   Star,
   CloudRain,
-  Home,
   RotateCcw,
+  Plane,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -28,11 +29,6 @@ import {
   BUDGET_OPTIONS,
   PEOPLE_OPTIONS,
   STAY_OPTIONS,
-  DATE_PROPOSALS,
-  STAY_PROPOSALS,
-  PLACES,
-  ITINERARY,
-  TOTAL_COST,
   won,
 } from "@/lib/travel/mockData";
 import type {
@@ -58,25 +54,28 @@ const PIPELINE_STEPS: { id: PipelineStepId; icon: typeof Brain; name: string }[]
   { id: "synth", icon: FileText, name: "Synthesizer" },
 ];
 
+const INITIAL_PIPELINE: Record<PipelineStepId, StepStatus> = {
+  orchestrator: "대기중",
+  date: "대기중",
+  stay: "대기중",
+  budget: "대기중",
+  place: "대기중",
+  routing: "대기중",
+  synth: "대기중",
+};
+
 export default function TravelPlannerApp() {
   const [phase, setPhase] = useState<Phase>("landing");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [answers, setAnswers] = useState<Answers>({});
   const [activeClarify, setActiveClarify] = useState<ClarifyKey | null>(null);
-  const [pipelineStatus, setPipelineStatus] = useState<Record<PipelineStepId, StepStatus>>({
-    orchestrator: "대기중",
-    date: "대기중",
-    stay: "대기중",
-    budget: "대기중",
-    place: "대기중",
-    routing: "대기중",
-    synth: "대기중",
-  });
+  const [pipelineStatus, setPipelineStatus] = useState<Record<PipelineStepId, StepStatus>>(INITIAL_PIPELINE);
   const [planResult, setPlanResult] = useState<PlanResult | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const userQueryRef = useRef<string>("");
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -98,15 +97,14 @@ export default function TravelPlannerApp() {
           .concat({
             id: uid(),
             role: "ai",
-            text:
-              "📋 파악한 정보: **제주도 · 6월 말 · 2박3일**\n아래 정보만 더 알려주시면 바로 시작할게요!",
+            text: "📋 요청을 파악했어요! 아래 정보를 알려주시면 최적 일정을 설계할게요.",
           }),
       );
       setTimeout(() => {
         addMessage({ id: uid(), role: "clarify", key: "budget" });
         setActiveClarify("budget");
       }, 500);
-    }, 1000);
+    }, 800);
   };
 
   const answerClarify = (key: ClarifyKey, value: string) => {
@@ -126,85 +124,131 @@ export default function TravelPlannerApp() {
     } else {
       setActiveClarify(null);
       setTimeout(() => {
-        addMessage({
-          id: uid(),
-          role: "ai",
-          text: "✅ 완벽해요! 지금부터 일정을 짜볼게요 🚀",
-        });
-        setTimeout(startPipeline, 600);
+        addMessage({ id: uid(), role: "ai", text: "✅ 완벽해요! 지금부터 일정을 짜볼게요 🚀" });
+        setTimeout(callStartPlan, 600);
       }, 400);
     }
   };
 
-  const startPipeline = () => {
-    setPhase("pipeline");
+  const callStartPlan = async () => {
+    setPhase("loading");
+    setError(null);
     addMessage({ id: uid(), role: "pipeline" });
 
-    // 실제 API 호출 (백그라운드 SSE)
-    abortRef.current?.abort();
-    abortRef.current = streamPlan(
-      {
+    // 파이프라인 애니메이션 (orchestrator 시작)
+    setPipelineStatus((s) => ({ ...s, orchestrator: "진행중" }));
+
+    try {
+      const currentAnswers = answers; // 클로저 캡처
+      const res = await startPlan({
         message: userQueryRef.current,
-        budget: answers.budget,
-        people: answers.people,
-        stay: answers.stay,
-      },
-      (_step, _status) => {
-        // TODO: SSE step 이벤트로 pipelineStatus 직접 구동 가능
-      },
-      (result) => {
-        setPlanResult(result);
-      },
-    );
+        budget: currentAnswers.budget,
+        people: currentAnswers.people,
+        stay: currentAnswers.stay,
+      });
 
-    // 모의 파이프라인 애니메이션 (API 응답 대기 중 UX)
-    setTimeout(() => {
+      handlePlanResult(res.thread_id, res.phase, res.candidates, res.result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "API 오류가 발생했습니다.");
+      setPhase("done");
+    }
+  };
+
+  const handlePlanResult = (
+    tid: string,
+    resultPhase: string,
+    candidates?: DateCandidate[] | HotelCandidate[],
+    result?: PlanResult,
+  ) => {
+    setThreadId(tid);
+
+    if (resultPhase === "date_selection") {
       setPipelineStatus((s) => ({ ...s, orchestrator: "완료", date: "진행중" }));
-    }, 800);
-  };
-
-  const confirmDate = (id: string) => {
-    setAnswers((a) => ({ ...a, dateChoice: id }));
-    setPipelineStatus((s) => ({ ...s, date: "완료", stay: "진행중" }));
-  };
-
-  const confirmStay = (id: string) => {
-    setAnswers((a) => ({ ...a, stayChoice: id }));
-    setPipelineStatus((s) => ({ ...s, stay: "완료", budget: "진행중" }));
-    setTimeout(() => {
-      setPipelineStatus((s) => ({ ...s, budget: "완료", place: "진행중" }));
-    }, 1500);
-    setTimeout(() => {
-      setPipelineStatus((s) => ({ ...s, place: "완료", routing: "진행중" }));
-    }, 3000);
-    setTimeout(() => {
-      setPipelineStatus((s) => ({ ...s, routing: "완료", synth: "진행중" }));
-    }, 4500);
-    setTimeout(() => {
-      setPipelineStatus((s) => ({ ...s, synth: "완료" }));
+      setPhase("date_selection");
+      addMessage({
+        id: uid(),
+        role: "date_proposal",
+        question: "날짜를 선택해주세요:",
+        candidates: (candidates ?? []) as DateCandidate[],
+      });
+    } else if (resultPhase === "hotel_selection") {
+      setPipelineStatus((s) => ({
+        ...s,
+        orchestrator: "완료",
+        date: "완료",
+        stay: "진행중",
+      }));
+      setPhase("hotel_selection");
+      addMessage({
+        id: uid(),
+        role: "hotel_proposal",
+        question: "숙소를 선택해주세요:",
+        candidates: (candidates ?? []) as HotelCandidate[],
+      });
+    } else if (resultPhase === "done" && result) {
+      setPipelineStatus({
+        orchestrator: "완료",
+        date: "완료",
+        stay: "완료",
+        budget: "완료",
+        place: "완료",
+        routing: "완료",
+        synth: "완료",
+      });
+      setPlanResult(result);
       setPhase("done");
       addMessage({ id: uid(), role: "itinerary" });
-    }, 6500);
+    }
+  };
+
+  const confirmDate = async (choice: string) => {
+    if (!threadId) return;
+    setMessages((prev) => prev.filter((m) => m.role !== "date_proposal"));
+    addMessage({ id: uid(), role: "answer", text: `날짜 선택: ${choice}번` });
+    setPipelineStatus((s) => ({ ...s, date: "완료", stay: "진행중" }));
+    setPhase("resuming");
+
+    try {
+      const res = await resumePlan(threadId, choice);
+      handlePlanResult(res.thread_id, res.phase, res.candidates, res.result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "API 오류가 발생했습니다.");
+      setPhase("done");
+    }
+  };
+
+  const confirmStay = async (choice: string) => {
+    if (!threadId) return;
+    setMessages((prev) => prev.filter((m) => m.role !== "hotel_proposal"));
+    addMessage({ id: uid(), role: "answer", text: `숙소 선택: ${choice}번` });
+    setPipelineStatus((s) => ({ ...s, stay: "완료", budget: "진행중" }));
+    setPhase("resuming");
+
+    try {
+      const res = await resumePlan(threadId, choice);
+
+      // budget → place → routing → synth 애니메이션
+      setTimeout(() => setPipelineStatus((s) => ({ ...s, budget: "완료", place: "진행중" })), 800);
+      setTimeout(() => setPipelineStatus((s) => ({ ...s, place: "완료", routing: "진행중" })), 2000);
+      setTimeout(() => setPipelineStatus((s) => ({ ...s, routing: "완료", synth: "진행중" })), 3200);
+
+      handlePlanResult(res.thread_id, res.phase, res.candidates, res.result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "API 오류가 발생했습니다.");
+      setPhase("done");
+    }
   };
 
   const reset = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
     setPlanResult(null);
     setPhase("landing");
     setMessages([]);
     setInput("");
     setAnswers({});
     setActiveClarify(null);
-    setPipelineStatus({
-      orchestrator: "대기중",
-      date: "대기중",
-      stay: "대기중",
-      budget: "대기중",
-      place: "대기중",
-      routing: "대기중",
-      synth: "대기중",
-    });
+    setThreadId(null);
+    setError(null);
+    setPipelineStatus(INITIAL_PIPELINE);
   };
 
   const handleSubmit = (text: string) => {
@@ -213,6 +257,8 @@ export default function TravelPlannerApp() {
     setInput("");
     startConversation(t);
   };
+
+  const isInputDisabled = phase !== "landing";
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -225,10 +271,7 @@ export default function TravelPlannerApp() {
         </div>
       </header>
 
-      <main
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto"
-      >
+      <main ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[800px] px-4 pb-40 pt-8">
           {phase === "landing" ? (
             <Landing onPick={handleSubmit} />
@@ -244,8 +287,8 @@ export default function TravelPlannerApp() {
                   onConfirmDate={confirmDate}
                   onConfirmStay={confirmStay}
                   onReset={reset}
-                  answers={answers}
                   planResult={planResult}
+                  error={error}
                 />
               ))}
             </div>
@@ -259,11 +302,13 @@ export default function TravelPlannerApp() {
             value={input}
             onChange={setInput}
             onSubmit={() => handleSubmit(input)}
-            disabled={phase !== "landing"}
+            disabled={isInputDisabled}
           />
-          {phase !== "landing" && (
+          {isInputDisabled && (
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              데모 시연 중입니다 — 위 카드를 눌러 진행해보세요.
+              {phase === "loading" || phase === "resuming"
+                ? "AI가 분석 중입니다…"
+                : "카드를 선택해 진행해주세요."}
             </p>
           )}
         </div>
@@ -324,7 +369,7 @@ function ChatInput({
             onSubmit();
           }
         }}
-        placeholder={disabled ? "데모가 진행 중입니다" : "어디로 떠나고 싶으세요? 예) 6월 말 제주도 2박3일…"}
+        placeholder={disabled ? "AI가 진행 중입니다" : "어디로 떠나고 싶으세요? 예) 6월 말 제주도 2박3일…"}
         rows={2}
         disabled={disabled}
         className="min-h-[60px] resize-none rounded-2xl border-border bg-card px-4 py-3 pr-14 text-base shadow-sm focus-visible:ring-2 focus-visible:ring-ring"
@@ -353,18 +398,18 @@ function MessageRow({
   onConfirmDate,
   onConfirmStay,
   onReset,
-  answers,
   planResult,
+  error,
 }: {
   m: Message;
   active: boolean;
   onClarify: (k: ClarifyKey, v: string) => void;
   pipelineStatus: Record<PipelineStepId, StepStatus>;
-  onConfirmDate: (id: string) => void;
-  onConfirmStay: (id: string) => void;
+  onConfirmDate: (choice: string) => void;
+  onConfirmStay: (choice: string) => void;
   onReset: () => void;
-  answers: Answers;
   planResult: PlanResult | null;
+  error: string | null;
 }) {
   if (m.role === "user") {
     return (
@@ -418,11 +463,30 @@ function MessageRow({
   if (m.role === "pipeline") {
     return (
       <div className="animate-fade-in">
-        <Pipeline
-          status={pipelineStatus}
-          onConfirmDate={onConfirmDate}
-          onConfirmStay={onConfirmStay}
-          answers={answers}
+        <Pipeline status={pipelineStatus} />
+      </div>
+    );
+  }
+
+  if (m.role === "date_proposal") {
+    return (
+      <div className="animate-fade-in">
+        <DateProposalCard
+          question={m.question}
+          candidates={m.candidates}
+          onConfirm={onConfirmDate}
+        />
+      </div>
+    );
+  }
+
+  if (m.role === "hotel_proposal") {
+    return (
+      <div className="animate-fade-in">
+        <HotelProposalCard
+          question={m.question}
+          candidates={m.candidates}
+          onConfirm={onConfirmStay}
         />
       </div>
     );
@@ -431,7 +495,7 @@ function MessageRow({
   if (m.role === "itinerary") {
     return (
       <div className="animate-fade-in">
-        <Itinerary onReset={onReset} answers={answers} planResult={planResult} />
+        <Itinerary onReset={onReset} planResult={planResult} error={error} />
       </div>
     );
   }
@@ -440,13 +504,10 @@ function MessageRow({
 }
 
 function renderInlineMarkdown(text: string) {
-  // very small **bold** parser
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((p, i) =>
     p.startsWith("**") && p.endsWith("**") ? (
-      <strong key={i} className="font-semibold">
-        {p.slice(2, -2)}
-      </strong>
+      <strong key={i} className="font-semibold">{p.slice(2, -2)}</strong>
     ) : (
       <span key={i}>{p}</span>
     ),
@@ -489,7 +550,7 @@ function ClarifyCard({
         ? { emoji: "👥", title: "몇 명이서 가세요?", options: PEOPLE_OPTIONS.map((o) => ({ label: o })) }
         : {
             emoji: "🏨",
-            title: "숙소 분위기는요?",
+            title: "숙소 분위기는요? (특정 호텔명도 입력 가능해요)",
             options: STAY_OPTIONS.map((o) => ({ label: `${o.emoji} ${o.label}`, value: o.label })),
           };
   return (
@@ -521,17 +582,7 @@ function ClarifyCard({
 
 /* -------------------- Pipeline -------------------- */
 
-function Pipeline({
-  status,
-  onConfirmDate,
-  onConfirmStay,
-  answers,
-}: {
-  status: Record<PipelineStepId, StepStatus>;
-  onConfirmDate: (id: string) => void;
-  onConfirmStay: (id: string) => void;
-  answers: Answers;
-}) {
+function Pipeline({ status }: { status: Record<PipelineStepId, StepStatus> }) {
   return (
     <Card className="ml-10 gap-0 p-0 shadow-sm">
       <div className="border-b border-border/60 px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -548,38 +599,7 @@ function Pipeline({
               name={s.name}
               status={st}
               visible={visible}
-            >
-              {s.id === "date" && st === "진행중" && (
-                <DateProposalCard onConfirm={onConfirmDate} />
-              )}
-              {s.id === "date" && st === "완료" && answers.dateChoice && (
-                <InlineNote>
-                  선택: {DATE_PROPOSALS.find((d) => d.id === answers.dateChoice)?.label}
-                </InlineNote>
-              )}
-              {s.id === "stay" && st === "진행중" && (
-                <StayProposalCard onConfirm={onConfirmStay} />
-              )}
-              {s.id === "stay" && st === "완료" && answers.stayChoice && (
-                <InlineNote>
-                  선택: {STAY_PROPOSALS.find((x) => x.id === answers.stayChoice)?.name}
-                </InlineNote>
-              )}
-              {s.id === "budget" && st === "완료" && (
-                <InlineNote>
-                  숙소 ₩420,000 확정 · 잔여 예산 ₩580,000 (식사·체험·교통)
-                </InlineNote>
-              )}
-              {s.id === "place" && st === "완료" && (
-                <PlaceList />
-              )}
-              {s.id === "routing" && st === "완료" && (
-                <InlineNote>최적 동선 계산 완료 · 총 이동시간 1시간 47분</InlineNote>
-              )}
-              {s.id === "synth" && st === "진행중" && (
-                <InlineNote>최종 일정표 생성 중…</InlineNote>
-              )}
-            </PipelineStepRow>
+            />
           );
         })}
       </ol>
@@ -627,16 +647,14 @@ function StatusBadge({ status }: { status: StepStatus }) {
   if (status === "완료") {
     return (
       <Badge className="gap-1 border-transparent bg-status-done text-status-done-foreground hover:bg-status-done">
-        <Check className="h-3 w-3" />
-        완료
+        <Check className="h-3 w-3" />완료
       </Badge>
     );
   }
   if (status === "진행중") {
     return (
       <Badge className="gap-1 border-transparent bg-status-active text-status-active-foreground hover:bg-status-active animate-pulse">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        진행중
+        <Loader2 className="h-3 w-3 animate-spin" />진행중
       </Badge>
     );
   }
@@ -647,112 +665,125 @@ function StatusBadge({ status }: { status: StepStatus }) {
   );
 }
 
-function InlineNote({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground/80 animate-fade-in">
-      {children}
-    </div>
-  );
-}
+/* -------------------- Date Proposal -------------------- */
 
-function DateProposalCard({ onConfirm }: { onConfirm: (id: string) => void }) {
-  const [selected, setSelected] = useState(DATE_PROPOSALS[1].id);
+function DateProposalCard({
+  question,
+  candidates,
+  onConfirm,
+}: {
+  question: string;
+  candidates: DateCandidate[];
+  onConfirm: (choice: string) => void;
+}) {
+  const [selected, setSelected] = useState("1");
+
   return (
-    <div className="space-y-2 animate-fade-in">
-      <div className="text-xs text-muted-foreground">날짜 3개를 제안합니다. 하나 선택해주세요.</div>
+    <Card className="ml-10 max-w-[85%] gap-3 p-4 shadow-sm animate-scale-in">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <CalendarDays className="h-4 w-4 text-muted-foreground" />
+        {question}
+      </div>
       <div className="grid gap-2">
-        {DATE_PROPOSALS.map((d) => (
-          <button
-            key={d.id}
-            onClick={() => setSelected(d.id)}
-            className={cn(
-              "flex flex-col items-start gap-0.5 rounded-lg border bg-card px-3 py-2 text-left text-sm transition",
-              selected === d.id
-                ? "border-foreground/60 ring-1 ring-foreground/20"
-                : "border-border hover:border-foreground/30",
-            )}
-          >
-            <div className="font-medium">{d.label}</div>
-            <div className="text-xs text-muted-foreground">{d.note}</div>
-          </button>
-        ))}
+        {candidates.map((c, i) => {
+          const idx = String(i + 1);
+          const stopsLabel =
+            c.stops === 0 ? "직항" : c.stops != null && c.stops > 0 ? `경유 ${c.stops}회` : "";
+          return (
+            <button
+              key={idx}
+              onClick={() => setSelected(idx)}
+              className={cn(
+                "flex flex-col items-start gap-1 rounded-lg border bg-card px-3 py-2.5 text-left text-sm transition",
+                selected === idx
+                  ? "border-foreground/60 ring-1 ring-foreground/20"
+                  : "border-border hover:border-foreground/30",
+              )}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <span>{c.check_in} ~ {c.check_out}</span>
+                {i === 0 && (
+                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                    추천
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                <span>{c.weather_summary}</span>
+                {c.flight_price > 0 && (
+                  <span className="flex items-center gap-1">
+                    <Plane className="h-3 w-3" />
+                    {won(c.flight_price)}
+                    {stopsLabel && ` · ${stopsLabel}`}
+                    {c.airline_name && ` · ${c.airline_name}`}
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
       </div>
       <Button size="sm" onClick={() => onConfirm(selected)} className="mt-1">
         <Check className="h-3.5 w-3.5" /> 이 날짜로 확정
       </Button>
-    </div>
+    </Card>
   );
 }
 
-function StayProposalCard({ onConfirm }: { onConfirm: (id: string) => void }) {
-  const [selected, setSelected] = useState(STAY_PROPOSALS[0].id);
+/* -------------------- Hotel Proposal -------------------- */
+
+function HotelProposalCard({
+  question,
+  candidates,
+  onConfirm,
+}: {
+  question: string;
+  candidates: HotelCandidate[];
+  onConfirm: (choice: string) => void;
+}) {
+  const [selected, setSelected] = useState("1");
+
   return (
-    <div className="space-y-2 animate-fade-in">
-      <div className="text-xs text-muted-foreground">바다 전망 숙소 3곳을 추천합니다.</div>
+    <Card className="ml-10 max-w-[85%] gap-3 p-4 shadow-sm animate-scale-in">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Hotel className="h-4 w-4 text-muted-foreground" />
+        {question}
+      </div>
       <div className="grid gap-2 sm:grid-cols-3">
-        {STAY_PROPOSALS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setSelected(s.id)}
-            className={cn(
-              "overflow-hidden rounded-lg border bg-card text-left transition",
-              selected === s.id
-                ? "border-foreground/60 ring-1 ring-foreground/20"
-                : "border-border hover:border-foreground/30",
-            )}
-          >
-            <img
-              src={s.image}
-              alt={s.name}
-              width={768}
-              height={512}
-              loading="lazy"
-              className="h-28 w-full object-cover"
-            />
-            <div className="p-2.5">
-              <div className="text-sm font-medium">{s.name}</div>
-              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                <Star className="h-3 w-3 fill-current text-amber-500" />
-                {s.rating} · {won(s.price)}/박
-              </div>
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {s.tags.map((t) => (
-                  <span key={t} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                    {t}
+        {candidates.map((h, i) => {
+          const idx = String(i + 1);
+          return (
+            <button
+              key={idx}
+              onClick={() => setSelected(idx)}
+              className={cn(
+                "flex flex-col items-start gap-1.5 rounded-lg border bg-card p-3 text-left transition",
+                selected === idx
+                  ? "border-foreground/60 ring-1 ring-foreground/20"
+                  : "border-border hover:border-foreground/30",
+              )}
+            >
+              <div className="text-sm font-medium leading-tight">{h.name}</div>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {h.rating > 0 && (
+                  <span className="flex items-center gap-0.5">
+                    <Star className="h-3 w-3 fill-current text-amber-500" />
+                    {h.rating}
                   </span>
-                ))}
+                )}
+                {h.cost > 0 && <span>{won(h.cost)}</span>}
               </div>
-            </div>
-          </button>
-        ))}
+              {h.address && (
+                <div className="text-[11px] text-muted-foreground line-clamp-1">{h.address}</div>
+              )}
+            </button>
+          );
+        })}
       </div>
       <Button size="sm" onClick={() => onConfirm(selected)} className="mt-1">
         <Check className="h-3.5 w-3.5" /> 이 숙소로 확정
       </Button>
-    </div>
-  );
-}
-
-function PlaceList() {
-  return (
-    <div className="space-y-1.5 animate-fade-in">
-      <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-        <CloudRain className="h-3 w-3" />
-        Day 2 오후 비 예보 → 실내 장소 우선 추천
-      </div>
-      {PLACES.map((p) => (
-        <div key={p.name} className="flex items-center justify-between rounded-md bg-muted/40 px-2.5 py-1.5 text-sm">
-          <span className="text-foreground/90">
-            {p.name} <span className="text-xs text-muted-foreground">· {p.type}</span>
-          </span>
-          {p.indoor && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-status-active px-2 py-0.5 text-[10px] font-medium text-status-active-foreground">
-              <Home className="h-2.5 w-2.5" /> 실내
-            </span>
-          )}
-        </div>
-      ))}
-    </div>
+    </Card>
   );
 }
 
@@ -760,51 +791,37 @@ function PlaceList() {
 
 function Itinerary({
   onReset,
-  answers,
   planResult,
+  error,
 }: {
   onReset: () => void;
-  answers: Answers;
   planResult: PlanResult | null;
+  error: string | null;
 }) {
-  if (planResult?.final_report) {
+  if (error) {
     return (
       <Card className="ml-10 gap-0 overflow-hidden p-0 shadow-sm">
-        <div className="border-b border-border/60 bg-muted/30 px-5 py-4">
-          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            <FileText className="h-3.5 w-3.5" />
-            최종 일정표
-          </div>
-          {planResult.hotel_name && (
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              <span>🏨 {planResult.hotel_name}</span>
-              {planResult.hotel_cost > 0 && <span>💰 숙박 {won(planResult.hotel_cost)}</span>}
-              {planResult.remaining_budget > 0 && (
-                <span>잔여 {won(planResult.remaining_budget)}</span>
-              )}
-            </div>
-          )}
-          {planResult.weather_summary && (
-            <div className="mt-1 text-xs text-muted-foreground">{planResult.weather_summary}</div>
-          )}
-        </div>
-        <div className="px-5 py-4">
-          <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-            {planResult.final_report}
-          </pre>
+        <div className="px-5 py-6 text-center">
+          <p className="text-sm font-medium text-destructive">오류가 발생했습니다</p>
+          <p className="mt-1 text-xs text-muted-foreground">{error}</p>
         </div>
         <div className="flex justify-end border-t border-border/60 bg-muted/30 px-5 py-4">
           <Button variant="outline" onClick={onReset}>
-            <RotateCcw className="h-4 w-4" />
-            일정 다시 짜기
+            <RotateCcw className="h-4 w-4" /> 다시 시도
           </Button>
         </div>
       </Card>
     );
   }
 
-  const dateLabel =
-    DATE_PROPOSALS.find((d) => d.id === answers.dateChoice)?.label ?? "6/27(금) – 6/29(일)";
+  if (!planResult?.final_report) {
+    return (
+      <Card className="ml-10 gap-0 p-6 shadow-sm text-center">
+        <p className="text-sm text-muted-foreground">결과를 불러오는 중입니다…</p>
+      </Card>
+    );
+  }
+
   return (
     <Card className="ml-10 gap-0 overflow-hidden p-0 shadow-sm">
       <div className="border-b border-border/60 bg-muted/30 px-5 py-4">
@@ -812,59 +829,24 @@ function Itinerary({
           <FileText className="h-3.5 w-3.5" />
           최종 일정표
         </div>
-        <div className="mt-2 text-xl font-semibold tracking-tight">제주도 · 2박3일</div>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <span>📅 {dateLabel}</span>
-          <span>👥 {answers.people ?? "2명"}</span>
-          <span>💰 총 예산 {won(1000000)}</span>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          {planResult.hotel_name && <span>🏨 {planResult.hotel_name}</span>}
+          {planResult.hotel_cost > 0 && <span>💰 숙박 {won(planResult.hotel_cost)}</span>}
+          {planResult.remaining_budget > 0 && <span>잔여 {won(planResult.remaining_budget)}</span>}
         </div>
-      </div>
-
-      <div className="divide-y divide-border/60">
-        {ITINERARY.map((d) => (
-          <div key={d.day} className="px-5 py-4">
-            <div className="mb-3 flex items-baseline gap-2">
-              <div className="text-sm font-semibold">{d.day}</div>
-              <div className="text-xs text-muted-foreground">{d.date}</div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs font-medium text-muted-foreground">
-                    <th className="pb-2 pr-3">시간</th>
-                    <th className="pb-2 pr-3">장소</th>
-                    <th className="pb-2 pr-3">활동</th>
-                    <th className="pb-2 pr-3">이동수단</th>
-                    <th className="pb-2 text-right">예상비용</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {d.rows.map((r, i) => (
-                    <tr key={i}>
-                      <td className="py-2 pr-3 text-muted-foreground">{r.time}</td>
-                      <td className="py-2 pr-3 font-medium">{r.place}</td>
-                      <td className="py-2 pr-3 text-foreground/80">{r.activity}</td>
-                      <td className="py-2 pr-3 text-xs text-muted-foreground">{r.transport}</td>
-                      <td className="py-2 text-right tabular-nums">
-                        {r.cost ? won(r.cost) : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        {planResult.weather_summary && (
+          <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+            <CloudRain className="h-3 w-3" />
+            {planResult.weather_summary.split("\n")[0]}
           </div>
-        ))}
+        )}
       </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 bg-muted/30 px-5 py-4">
-        <div>
-          <div className="text-xs text-muted-foreground">총 예상 비용</div>
-          <div className="text-2xl font-semibold tabular-nums">{won(TOTAL_COST)}</div>
-        </div>
+      <div className="px-5 py-4">
+        <MarkdownContent>{planResult.final_report}</MarkdownContent>
+      </div>
+      <div className="flex justify-end border-t border-border/60 bg-muted/30 px-5 py-4">
         <Button variant="outline" onClick={onReset}>
-          <RotateCcw className="h-4 w-4" />
-          일정 다시 짜기
+          <RotateCcw className="h-4 w-4" /> 일정 다시 짜기
         </Button>
       </div>
     </Card>
