@@ -77,7 +77,7 @@ def search_hotel_candidates(intent: dict, max_per_night: int, limit: int = 10) -
                 cost = _parse_cost(h.total_rate)
             else:
                 cost = _parse_cost(h.rate_per_night) * nights
-                
+
             candidates.append({
                 "name": h.name,
                 "address": h.address or "",
@@ -113,22 +113,36 @@ def _build_mock(intent: dict) -> list[dict]:
     ]
 
 
-def make_stay_node():
-    def stay_node(state: AgentState) -> dict:
+def _budget_caps(intent: dict) -> tuple[int, int, int]:
+    """(after_flight, max_hotel_total, max_per_night) 계산."""
+    budget = intent["budget"]
+    nights = max(intent.get("trip_nights", 1), 1)
+    flight_cost = intent.get("flight_cost", 0)
+    after_flight = budget - flight_cost
+    if flight_cost > 0:
+        max_hotel_total = max(int(after_flight * 0.9), 0)
+    else:
+        max_hotel_total = int(budget * HOTEL_BUDGET_RATIO)
+    return after_flight, max_hotel_total, max_hotel_total // nights
+
+
+# ── hotel_compute: API 호출 (interrupt 없음 — 재실행돼도 API 중복 없음) ────────────
+
+def make_hotel_compute_node():
+    def hotel_compute_node(state: AgentState) -> dict:
         intent = state["intent"]
         preferred = intent.get("preferred_hotel")
         budget = intent["budget"]
         nights = max(intent.get("trip_nights", 1), 1)
         adults = intent.get("adults", 1)
-        # flight_cost: Naver/SerpAPI 모두 1인 왕복 기준이므로 adults 곱한 값이 들어옴
         flight_cost = intent.get("flight_cost", 0)
 
         print(f"\n🏨 [3/5] 숙소 확인 중 — {intent['destination']}")
         print(f"  예산 현황: 총 {budget:,}원 | 항공(왕복×{adults}인) {flight_cost:,}원 차감")
 
-        after_flight = budget - flight_cost
+        after_flight, max_hotel_total, max_per_night = _budget_caps(intent)
 
-        # Case 1: 선호 호텔 명시 → 가격 조회 없이 패스
+        # Case 1: 선호 호텔 명시 → 후보 검색 없이 바로 확정
         if preferred:
             print(f"  ✓ 선호 호텔 사용: {preferred} (숙박비 미확인)")
             return {
@@ -139,19 +153,31 @@ def make_stay_node():
                 "hotel_candidates": [],
             }
 
-        # Case 2: 선호 없음 → 잔여 예산 기반 검색
-        # 항공비가 이미 차감된 경우: 잔여의 90% 숙박 배분
-        # 항공비 미확정(0)인 경우: 총 예산의 HOTEL_BUDGET_RATIO% 배분 (항공비 몫 확보)
-        if flight_cost > 0:
-            max_hotel_total = max(int(after_flight * 0.9), 0)
-        else:
-            max_hotel_total = int(budget * HOTEL_BUDGET_RATIO)
+        # Case 2: 선호 없음 → 잔여 예산 기반 검색만 (interrupt 없음)
+        if flight_cost == 0:
             print(f"  △ 항공비 미확정 — 총 예산의 {int(HOTEL_BUDGET_RATIO*100)}%를 숙박 상한으로 설정")
-
-        max_per_night = max_hotel_total // nights
         print(f"  → 숙박 가용 {max_hotel_total:,}원 ({nights}박) → 1박 상한 {max_per_night:,}원")
 
         candidates = search_hotel_candidates(intent, max_per_night, limit=10)
+        # hotel_name을 빈 문자열로 → _route_after_hotel_compute이 hotel_select로 라우팅
+        return {
+            "hotel_candidates": candidates,
+            "hotel_name": "",
+        }
+
+    return hotel_compute_node
+
+
+# ── hotel_select: interrupt만 처리 (재실행 시 API 호출 없음) ─────────────────────
+
+def make_hotel_select_node():
+    def hotel_select_node(state: AgentState) -> dict:
+        intent = state["intent"]
+        candidates = state.get("hotel_candidates", [])
+        budget = intent["budget"]
+        nights = max(intent.get("trip_nights", 1), 1)
+
+        _, max_hotel_total, max_per_night = _budget_caps(intent)
 
         choice = interrupt({
             "type": "hotel_selection",
@@ -170,7 +196,7 @@ def make_stay_node():
             idx = 0
 
         chosen = candidates[idx]
-        # hotel cost = 총 숙박비 (nights 기준 total_rate 또는 per_night * nights)
+        flight_cost = intent.get("flight_cost", 0)
         hotel_cost = chosen["cost"]
         remaining = budget - flight_cost - hotel_cost
         print(
@@ -183,7 +209,6 @@ def make_stay_node():
             "hotel_address": chosen.get("address", ""),
             "hotel_cost": hotel_cost,
             "remaining_budget": remaining,
-            "hotel_candidates": candidates,
         }
 
-    return stay_node
+    return hotel_select_node
