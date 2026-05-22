@@ -1,18 +1,13 @@
 # -*- coding: utf-8 -*-
 """API 엔드포인트, 요청 변수 목록, WMO 날씨 코드 상수 정의"""
 
-# ── Geocoding ──────────────────────────────────────────────────────────────
-# Nominatim(OpenStreetMap): 한글 포함 다국어 지원, API 키 불필요
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_HEADERS = {"User-Agent": "WeatherApp/1.0 (mixup-hackathon)"}
 
-# ── Open-Meteo 날씨 API (API 키 불필요) ────────────────────────────────────
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 SEASONAL_URL = "https://seasonal-api.open-meteo.com/v1/seasonal"
 
-# ── 일별 예보 변수 목록 ────────────────────────────────────────────────────
-# archive API는 precipitation_probability_max 미지원 → get_archive에서 제외
 DAILY_VARS = [
     "temperature_2m_max",
     "temperature_2m_min",
@@ -36,8 +31,6 @@ DAILY_VARS = [
     "weathercode",
 ]
 
-# ── 시즌 예보 변수 목록 (17일~9개월) ─────────────────────────────────────
-# Seasonal API가 지원하는 변수만 포함
 SEASONAL_VARS = [
     "temperature_2m_max",
     "temperature_2m_min",
@@ -45,8 +38,6 @@ SEASONAL_VARS = [
     "windspeed_10m_max",
 ]
 
-# ── WMO 날씨 코드 → 한글 설명 ─────────────────────────────────────────────
-# 출처: https://open-meteo.com/en/docs
 WMO_CODES = {
     0: "맑음",
     1: "대체로 맑음",

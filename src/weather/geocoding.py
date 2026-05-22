@@ -34,8 +34,6 @@ def get_coordinates(city_name: str) -> tuple[float, float, str, str, str]:
 
     r = data[0]
     addr = r.get("address", {})
-
-    # 도시 단위 이름 우선순위: city > town > county > display_name 첫 번째 토큰
     name = (
         addr.get("city")
         or addr.get("town")
@@ -43,6 +41,4 @@ def get_coordinates(city_name: str) -> tuple[float, float, str, str, str]:
         or r["display_name"].split(",")[0]
     )
     country = addr.get("country", "")
-
-    # 타임존은 Open-Meteo가 좌표로 자동 결정
     return float(r["lat"]), float(r["lon"]), name, country, "auto"
