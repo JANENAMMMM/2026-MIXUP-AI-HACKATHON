@@ -16,8 +16,20 @@ def main() -> None:
             continue
         if user_input.lower() == "exit":
             break
-        result = app.invoke({"messages": [HumanMessage(content=user_input)]})
-        print(f"AI: {result['messages'][-1].content}\n")
+        result = app.invoke({
+            "messages": [HumanMessage(content=user_input)],
+            "intent": None,
+            "is_rainy": False,
+            "weather_summary": "",
+            "hotel_name": "",
+            "hotel_address": "",
+            "hotel_cost": 0,
+            "remaining_budget": 0,
+            "restaurants": [],
+            "attractions": [],
+            "final_report": "",
+        })
+        print(f"\n{result.get('final_report') or result['messages'][-1].content}\n")
 
 
 if __name__ == "__main__":
