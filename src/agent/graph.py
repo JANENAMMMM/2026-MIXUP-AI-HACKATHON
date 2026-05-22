@@ -128,7 +128,7 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
         )
 
         if not flights:
-            return _weather_only_candidates(dest, trip_nights, today)
+            return _weather_only_candidates(dest, trip_nights, today, intent)
 
         # 가격 점수: 순위 1위=5점, 10위=0.5점
         max_price = max(f.price for f in flights)
@@ -189,12 +189,12 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             "date_fixed": True,
         }
 
-    def _weather_only_candidates(dest: str, trip_nights: int, today: date_type) -> dict:
-        """항공 API 실패 시 날씨만으로 다음 달 최적 날짜 3개를 추천한다."""
-        start = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+    def _weather_only_candidates(dest: str, trip_nights: int, today: date_type, intent: TravelIntent) -> dict:
+        """항공 API 실패 시 날씨만으로 단기 예보 범위 내 최적 날짜 3개를 추천한다."""
+        # 단기 예보 한계(D+14)까지만 탐색 — D+15 이상은 데이터 없을 수 있음
         candidates = []
-        for offset in range(0, 30, 3):
-            check_date = (start + timedelta(days=offset)).isoformat()
+        for offset in range(1, 14, 3):
+            check_date = (today + timedelta(days=offset)).isoformat()
             try:
                 w = get_weather(dest, check_date)
             except Exception:
@@ -202,9 +202,11 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
             if not w or not w.daily:
                 continue
             d = w.daily
+            if d.temp_max is None:  # 날짜가 예보 범위 밖이면 스킵
+                continue
             prob = d.precipitation_probability_max or 0
-            temp_max = d.temp_max or 20
-            score = (0 if prob >= 50 else 3) + (3 if 18 <= temp_max <= 28 else 0)
+            temp_max = d.temp_max
+            score = (3 if prob < 50 else 0) + (3 if 18 <= temp_max <= 28 else 0)
             check_out = (
                 datetime.strptime(check_date, "%Y-%m-%d").date()
                 + timedelta(days=trip_nights)
@@ -222,14 +224,11 @@ def build_graph(model: str = "solar-pro3", temperature: float = 0.7):
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
 
-        intent_update = {}
+        updated_intent = dict(intent)
         if candidates:
             best = candidates[0]
-            intent_update = {"check_in": best["check_in"], "check_out": best["check_out"]}
-
-        from copy import deepcopy
-        updated_intent = deepcopy(state["intent"]) if "intent" in state else {}  # type: ignore
-        updated_intent.update(intent_update)
+            updated_intent["check_in"] = best["check_in"]
+            updated_intent["check_out"] = best["check_out"]
 
         return {"candidate_dates": candidates[:3], "intent": updated_intent, "date_fixed": True}
 
