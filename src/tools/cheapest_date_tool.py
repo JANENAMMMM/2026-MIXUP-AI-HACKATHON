@@ -14,7 +14,6 @@ from cheapest_date.flight_crawler import get_cheapest_dates
 # 사용 시나리오:
 #   - 사용자가 "6~7월 중 제일 싼 날짜로 도쿄 4박5일 가고 싶어" 처럼
 #     날짜가 아직 정해지지 않은 경우에 이 tool을 사용한다.
-#   - 날짜가 확정된 경우에는 transport_tools.tool_search_flights를 사용한다.
 # ==========================================
 
 class CheapestDateArgs(BaseModel):
