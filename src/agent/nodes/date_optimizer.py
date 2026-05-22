@@ -264,8 +264,12 @@ def _score_flight(
 ) -> tuple[float, str]:
     max_price = max(f.price for f in flights)
     min_price = min(f.price for f in flights)
-    price_range = max(max_price - min_price, 1)
-    price_score = round((max_price - flight.price) / price_range * 5, 2)
+    price_range = max_price - min_price
+    # 결과가 1개이면 price_range=0 → 중간값(2.5점) 부여
+    if price_range == 0:
+        price_score = 2.5
+    else:
+        price_score = round((max_price - flight.price) / price_range * 5, 2)
 
     stops_factor = 4.0 if prefer_nonstop else 2.0
     stops_penalty = flight.stops * stops_factor
