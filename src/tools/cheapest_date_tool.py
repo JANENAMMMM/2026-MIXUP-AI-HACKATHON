@@ -34,15 +34,7 @@ def tool_get_cheapest_flight_dates(
     is_nonstop: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    날짜가 정해지지 않은 상태에서 가장 저렴한 항공권 날짜 조합을 찾아줍니다.
-
-    사용 조건:
-    - 사용자가 "언제가 제일 싸?", "저렴한 날짜로 가고 싶어", "여름방학/추석 연휴에 가고 싶어" 처럼
-      출발일이 미확정인 경우에 이 도구를 사용합니다.
-    - 사용자가 특정 날짜를 이미 말한 경우에는 이 도구 대신
-      tool_search_flights를 사용하세요.
-    - 최적 날짜를 추천할 때는 이 도구의 결과와 tool_get_weather의 날씨 정보를
-      함께 참고하여 가격과 날씨를 종합적으로 판단하세요.
+    출발 월(月)만 정해진 상태에서 해당 기간 내 최저가 날짜 조합을 찾아줍니다.
 
     반환값 (최대 5개, 가격 오름차순):
     - departure_date: 출발 날짜 (YYYY-MM-DD)
@@ -55,7 +47,6 @@ def tool_get_cheapest_flight_dates(
     주의:
     - months는 반드시 'YYYYMM' 형식 (예: '202607')으로 전달해야 합니다.
     - trip_days는 '박' 수가 아닌 '일' 수입니다 (3박4일 → 4).
-    - 결과가 없으면 조회 월 범위를 넓히거나 trip_days 범위를 조정해 보세요.
     """
     try:
         results = get_cheapest_dates(

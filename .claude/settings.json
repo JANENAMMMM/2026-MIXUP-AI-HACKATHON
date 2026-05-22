@@ -3,7 +3,8 @@
     "allow": [
       "Bash(.venv/Scripts/python.exe -c ' *)",
       "Bash(python -c \"import sys; sys.path.insert\\(0, 'src'\\); from tools.cheapest_date_tool import tool_get_cheapest_flight_dates; print\\('OK:', tool_get_cheapest_flight_dates.name\\)\")",
-      "Bash(python -c \"import sys; sys.path.insert\\(0, 'src'\\); from cheapest_date.flight_crawler import get_cheapest_dates; from cheapest_date.models import FlightPrice; print\\('cheapest_date 모듈 OK'\\)\")"
+      "Bash(python -c \"import sys; sys.path.insert\\(0, 'src'\\); from cheapest_date.flight_crawler import get_cheapest_dates; from cheapest_date.models import FlightPrice; print\\('cheapest_date 모듈 OK'\\)\")",
+      "Bash(git checkout *)"
     ]
   }
 }
