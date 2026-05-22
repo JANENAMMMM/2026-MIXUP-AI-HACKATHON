@@ -1,0 +1,10 @@
+[project]
+name = "2026-mixup-ai-hackathon"
+version = "0.1.0"
+description = "전세계 날씨 조회 - Open-Meteo API (API 키 불필요)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+]

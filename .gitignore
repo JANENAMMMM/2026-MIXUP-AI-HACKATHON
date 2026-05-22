@@ -1,0 +1,31 @@
+# 환경 변수 (API 키 등 민감 정보)
+.env
+
+# Python 가상환경 (uv가 자동 생성 - 커밋 불필요)
+.venv/
+venv/
+env/
+
+# uv.lock 은 커밋 대상 (재현 가능한 빌드 보장)
+# uv.lock
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 임시 스크립트 (언더스코어 하나로 시작하는 파일, __init__.py 등 제외)
+_[!_]*.py
+
+# OS
+.DS_Store
+Thumbs.db
