@@ -12,6 +12,7 @@ env/
 *.pyo
 .ipynb_checkpoints/
 *.ipynb
+*.png
 
 # ── Node / 프론트엔드 ──────────────────────────────────────
 node_modules/
