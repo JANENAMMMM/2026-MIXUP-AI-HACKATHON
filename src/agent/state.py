@@ -12,6 +12,7 @@ class TravelIntent(TypedDict):
     trip_nights: int        # 숙박 일수
     target_months: list     # 검색 대상 월 목록 (예: ["202607"]) — date_fixed=False일 때 사용
     prefer_nonstop: bool    # True면 직항 선호 → 경유 감점 폭 증가
+    preferred_hotel: str | None  # 사용자가 명시한 선호 호텔명 (없으면 null)
 
 
 class AgentState(TypedDict):
@@ -33,6 +34,7 @@ class AgentState(TypedDict):
     hotel_address: str
     hotel_cost: int
     remaining_budget: int
+    hotel_candidates: list  # 예산 내 추천 후보 3곳 (선호 호텔 없을 때 채워짐)
 
     # 5. Place Node 출력
     restaurants: list
