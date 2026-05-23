@@ -49,10 +49,8 @@ class Hotel:
 
     @classmethod
     def from_api_response(cls, data: dict) -> "Hotel":
-        # Robust thumbnail extraction
         thumbnail = data.get("thumbnail")
         if not thumbnail:
-            # Try images[0].thumbnail or images[0].src or images[0].image
             images = data.get("images") or data.get("photos")
             if isinstance(images, list) and images:
                 img0 = images[0]
@@ -65,7 +63,6 @@ class Hotel:
         address = data.get("address") or data.get("address_snippet") or data.get("location") or ""
         name = data.get("name", "")
 
-        # 사용자가 바로 접속할 수 있도록 모든 호텔의 상세 링크를 구글 트래블 검색 URL로 일괄 통일합니다.
         search_query = f"{name} {address}".strip()
         details_link = f"https://www.google.com/travel/search?q={urllib.parse.quote(search_query)}"
 

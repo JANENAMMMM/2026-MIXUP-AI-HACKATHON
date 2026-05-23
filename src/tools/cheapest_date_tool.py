@@ -5,17 +5,6 @@ from langchain_core.tools import tool
 from cheapest_date.flight_crawler import get_cheapest_dates
 
 
-# ==========================================
-# 날짜 미정 최저가 항공권 검색 Tool (Naver Flights)
-# ==========================================
-# 네이버 항공권 GraphQL API를 통해 특정 월(들)과 여행 일수를 기준으로
-# 가장 저렴한 출발 날짜 조합을 상위 5개 반환한다.
-#
-# 사용 시나리오:
-#   - 사용자가 "6~7월 중 제일 싼 날짜로 도쿄 4박5일 가고 싶어" 처럼
-#     날짜가 아직 정해지지 않은 경우에 이 tool을 사용한다.
-# ==========================================
-
 class CheapestDateArgs(BaseModel):
     origin: str = Field(..., description="출발 공항 IATA 코드 (예: 'ICN')")
     destination: str = Field(..., description="도착 공항 IATA 코드 (예: 'NRT', 'LHR', 'CDG')")
@@ -33,19 +22,9 @@ def tool_get_cheapest_flight_dates(
     is_nonstop: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    출발 월(月)만 정해진 상태에서 해당 기간 내 최저가 날짜 조합을 찾아줍니다.
+    지정 월 내에서 왕복 최저가 날짜 조합을 최대 5개 반환한다.
 
-    반환값 (최대 5개, 가격 오름차순):
-    - departure_date: 출발 날짜 (YYYY-MM-DD)
-    - return_date: 귀국 날짜 (YYYY-MM-DD)
-    - price_krw: 왕복 최저가 (원화)
-    - trip_days: 총 여행 일수 (박+1)
-    - airlines: 운항 항공사 코드 목록
-    - stops: 경유 횟수 (0=직항)
-
-    주의:
-    - months는 반드시 'YYYYMM' 형식 (예: '202607')으로 전달해야 합니다.
-    - trip_days는 '박' 수가 아닌 '일' 수입니다 (3박4일 → 4).
+    반환값: departure_date, return_date, price_krw, trip_days, airlines, stops
     """
     try:
         results = get_cheapest_dates(

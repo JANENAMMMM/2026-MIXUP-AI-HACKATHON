@@ -264,7 +264,6 @@ def _display_top10(candidates: list[dict], dest: str, trip_nights: int) -> None:
         weather_short = c.get("weather_summary", "")
         ret_short = c.get("check_out", "?")[5:]
 
-        # 개선 1: 강수 20mm 초과 시 ☔ 경고 추가
         rain_m = _re.search(r"강수 ([\d.]+)mm", weather_short)
         rain_total = float(rain_m.group(1)) if rain_m else 0.0
         rain_warn = " ☔" if rain_total > 20 else ""
@@ -320,7 +319,7 @@ def make_date_compute_node():
             print("  ✗ 항공권 조회 실패 — 날씨 기반 추천으로 전환")
             return _weather_only_candidates(dest, trip_nights, today, intent)
 
-        # 개선 2: 출발 시각 없는 항목(Naver) SerpAPI로 보충 — 테이블 표시 전에 처리
+        # 출발 시각 없는 항목 SerpAPI로 보충
         no_time = [c for c in top10 if not c.get("departure_time")]
         if no_time:
             print(f"  → 출발 시각 보완 중 ({len(no_time)}건)...")

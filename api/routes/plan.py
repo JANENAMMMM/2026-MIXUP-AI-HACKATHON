@@ -277,7 +277,6 @@ async def stream_plan(message: str, budget: str = "", people: str = "", stay: st
         )
 
         # 그래프가 완료되기 전까지 진행 중 이벤트를 전송한다
-        # TODO: LangGraph stream_mode="updates"를 사용하면 노드별 실시간 이벤트 가능
         for step in steps[:-1]:
             yield f"data: {json.dumps({'step': step, 'status': '진행중'})}\n\n"
             await asyncio.sleep(0.3)
